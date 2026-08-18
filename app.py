@@ -46,7 +46,7 @@ with st.sidebar:
     st.divider()
 
 # ==========================================
-# 1. TAMPILAN KHUSUS PENONTON / MC
+# 1. TAMPILAN KHUSUS PENONTON / MC (PER SESI / TAB)
 # ==========================================
 if role == "👥 Penonton (Live Score)":
     col_logo, col_title = st.columns([1, 4])
@@ -79,7 +79,7 @@ if role == "👥 Penonton (Live Score)":
         except:
             pass
 
-    if live_data and live_data.get('tables'):
+    if live_data and live_data.get('tables_dict'):
         st.markdown(f"""
         <div class="metric-card">
             <h4 style="margin:0; color:#1e3c72;">🏁 KELAS: {live_data.get('kelas', '-')}</h4>
@@ -87,11 +87,21 @@ if role == "👥 Penonton (Live Score)":
         </div>
         """, unsafe_allow_html=True)
         
-        for block_title, data_table in live_data.get('tables', []):
-            st.markdown(f"#### 📋 {block_title}")
-            df_view = pd.DataFrame(data_table)
-            st.dataframe(df_view, hide_index=True, use_container_width=True)
-            st.write("")
+        tables_dict = live_data.get('tables_dict', {})
+        available_tabs = [k for k, v in tables_dict.items() if len(v) > 0]
+        
+        if available_tabs:
+            # TAMPILKAN TAB PER SESI AGAR RAPI DAN BERURUTAN
+            tabs_ui = st.tabs(available_tabs)
+            for tab_name, tab_ui in zip(available_tabs, tabs_ui):
+                with tab_ui:
+                    for block_title, data_table in tables_dict[tab_name]:
+                        st.markdown(f"#### 📋 {block_title}")
+                        df_view = pd.DataFrame(data_table)
+                        st.dataframe(df_view, hide_index=True, use_container_width=True)
+                        st.write("")
+        else:
+            st.info("Belum ada data tabel yang siap ditampilkan.")
     else:
         st.info("ℹ️ Belum ada babak yang dipublikasikan juri untuk kelas ini.")
     
@@ -266,7 +276,6 @@ elif skema_alur == "Otomatis (Berdasarkan Jumlah Peserta)" and total_peserta_akt
 
 edited_rep, edited_qf, edited_sf, edited_final = None, None, None, None
 
-# DAFTAR TIER MULTI-FINAL SECARA BERURUTAN
 FINAL_TIERS = ["Final Utama", "Final Novice", "Final Rookie", "Final Beginner", "Final Newbie", "Final Harapan"]
 
 if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)":
@@ -290,18 +299,17 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
             rem_list = g_df[g_df['Rank di Grup'] > quota].index.tolist()
             rest_riders.extend(rem_list)
             
-    # BAGIKAN SISA RIDER KE FINAL TIER (NOVICE, ROOKIE, BEGINNER, NEWBIE)
+    # SISA RIDER KE FINAL TIER (Finisher)
     if rest_riders:
         df_rest = klasemen_aktif.loc[rest_riders].sort_values(by=['Total Point', 'M2_Num', 'M1_Num'])
-        tier_start_idx = 2 # Mulai dari Rookie jika jalur utama menuju Utama & Novice
+        tier_start_idx = 2 
         for i, idx_r in enumerate(df_rest.index):
             tier_idx = min(tier_start_idx + (i // batas_gate), len(FINAL_TIERS) - 1)
             klasemen_aktif.at[idx_r, 'Status'] = FINAL_TIERS[tier_idx]
             klasemen_aktif.at[idx_r, 'Gate'] = (i % batas_gate) + 1
 
-    # PEMBAGIAN BABAK LOLOS
+    # REMARK & ALUR LOLOS MOTO
     if use_qf:
-        # QUARTER FINAL (DIBAGI KE QF 1, QF 2, QF 3, QF 4)
         for i, idx_r in enumerate(pass_riders):
             qf_num = (i % 4) + 1
             klasemen_aktif.at[idx_r, 'Status'] = f"Quarter-Final {qf_num}"
@@ -312,7 +320,6 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
                 klasemen_aktif.at[idx_r, 'Status'] = "Repechage"
                 klasemen_aktif.at[idx_r, 'Gate'] = i + 1
     else:
-        # SEMI FINAL LANGSUNG (SF 1 & SF 2)
         for i, idx_r in enumerate(pass_riders):
             sf_num = (i % 2) + 1
             klasemen_aktif.at[idx_r, 'Status'] = f"Semi-Final {sf_num}"
@@ -323,9 +330,10 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
                 klasemen_aktif.at[idx_r, 'Status'] = "Repechage"
                 klasemen_aktif.at[idx_r, 'Gate'] = i + 1
 
-    # ==========================================
+    # SIMPAN REMARK HASIL MOTO UNTUK REVIEW PENONTON
+    klasemen_aktif['Status_Moto'] = klasemen_aktif['Status']
+
     # FASE 2: REPECHAGE
-    # ==========================================
     rep_df = klasemen_aktif[klasemen_aktif['Status'] == 'Repechage'].copy().sort_values('Gate')
     if enable_repechage and len(rep_df) > 0:
         st.header("2. 🛟 Fase 2: Repechage")
@@ -353,9 +361,7 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
                     else: klasemen_aktif.at[idx, 'Status'] = "Final Rookie"
         st.divider()
 
-    # ==========================================
-    # FASE 3A: QUARTER FINAL (JIKA DIKATIFKAN)
-    # ==========================================
+    # FASE 3A: QUARTER-FINAL
     if use_qf:
         st.header("3. ⚡ Fase 3A: Quarter-Final (QF 1 - 4)")
         qf_df = klasemen_aktif[klasemen_aktif['Status'].str.startswith('Quarter-Final', na=False)].copy().sort_values(['Status', 'Gate'])
@@ -375,16 +381,13 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
                 klasemen_aktif.at[idx, 'Hasil QF'] = hqf
                 if hqf.isdigit():
                     pos = int(hqf)
-                    # 2 Besar ke SF, sisanya ke Final Novice / Rookie
                     if pos <= 2:
                         klasemen_aktif.at[idx, 'Status'] = "Semi-Final 1" if "1" in str(edited_qf.at[idx, 'Status']) or "3" in str(edited_qf.at[idx, 'Status']) else "Semi-Final 2"
                     else:
                         klasemen_aktif.at[idx, 'Status'] = "Final Novice" if pos == 3 else "Final Rookie"
             st.divider()
 
-    # ==========================================
     # FASE 3B: SEMI-FINAL
-    # ==========================================
     st.header("3B. ⚔️ Fase 3B: Semi-Final (SF 1 & 2)")
     sf_df = klasemen_aktif[klasemen_aktif['Status'].str.startswith('Semi-Final', na=False)].copy().sort_values(['Status', 'Gate'])
     if len(sf_df) > 0:
@@ -403,10 +406,8 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
             klasemen_aktif.at[idx, 'Hasil Semi-Final'] = hsf
             if hsf.isdigit():
                 pos = int(hsf)
-                # 2 Terdepan SF ke Final Utama, sisanya ke Final Novice
                 klasemen_aktif.at[idx, 'Status'] = 'Final Utama' if pos <= 2 else 'Final Novice'
                 
-        # Re-index gate untuk Final Utama & Novice
         for target_final in ['Final Utama', 'Final Novice']:
             mask = klasemen_aktif['Status'] == target_final
             if mask.sum() > 0:
@@ -415,17 +416,15 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
         st.divider()
 
 else:
-    # FORMAT LANGSUNG MULTI-FINAL (BAGI MERATA SESUAI URUTAN POIN)
     if len(klasemen_aktif) > 0:
         klasemen_aktif = klasemen_aktif.sort_values(by=['Total Point', 'M2_Num', 'M1_Num', 'Group'])
         for i, idx_r in enumerate(klasemen_aktif.index):
             tier_idx = min(i // batas_gate, len(FINAL_TIERS) - 1)
             klasemen_aktif.at[idx_r, 'Status'] = FINAL_TIERS[tier_idx]
             klasemen_aktif.at[idx_r, 'Gate'] = (i % batas_gate) + 1
+        klasemen_aktif['Status_Moto'] = klasemen_aktif['Status']
 
-# ==========================================
-# FASE 4: FINAL & INPUT PODIUM
-# ==========================================
+# FASE 4: FINAL
 st.header("4. 🏆 Fase 4: Hasil Final & Input Podium")
 
 status_map = {t: i for i, t in enumerate(FINAL_TIERS)}
@@ -482,40 +481,59 @@ def prepare_block(df_filtered, block_type="MOTO"):
         res.columns = ['Nama Rider', 'No. Plate', 'Komunitas', 'Hasil Podium', 'Gate']
         res['Gate'] = res['Gate'].astype(str)
         return res
+    elif block_type == "MOTO":
+        cols_base = ['Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Status_Moto']
+        cols_rename = ['Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Remark / Status Lolos']
+        res = df_filtered[cols_base].copy()
+        res.columns = cols_rename
+        res['Total Poin'] = res['Total Poin'].astype(int).astype(str)
+        return res
     else:
-        cols_base = ['Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Status', 'Gate']
-        cols_rename = ['Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Bracket', 'Gate']
+        cols_base = ['Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Gate']
+        cols_rename = ['Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Gate']
         res = df_filtered[cols_base].copy()
         res.columns = cols_rename
         res['Total Poin'] = res['Total Poin'].astype(int).astype(str)
         res['Gate'] = res['Gate'].astype(str)
         return res
 
-blocks_to_export = []
+# KELOMPOKKAN TABEL SESUAI SESI PERTANDINGAN
+tables_dict = {
+    "🏁 Kualifikasi Moto": [],
+    "🛟 Repechage": [],
+    "⚡ Quarter-Final": [],
+    "⚔️ Semi-Final": [],
+    "🏆 Babak Final (Podium)": []
+}
 
 if not klasemen_aktif.empty:
+    # 1. Kualifikasi Moto
     for g in grup_valid:
         df_g = klasemen_aktif[klasemen_aktif['Group'] == g].sort_values(by=['Total Point', 'M2_Num', 'M1_Num'])
-        blocks_to_export.append((f"MOTO - GRUP {g}", prepare_block(df_g, "MOTO")))
+        tables_dict["🏁 Kualifikasi Moto"].append((f"MOTO - GRUP {g}", prepare_block(df_g, "MOTO")))
         
-    df_b_rep = klasemen_aktif[klasemen_aktif['Status'] == "Repechage"].sort_values('Gate')
+    # 2. Repechage
+    df_b_rep = klasemen_aktif[klasemen_aktif.get('Status_Moto', '') == "Repechage"].sort_values('Gate')
     if not df_b_rep.empty:
-        blocks_to_export.append(("REPECHAGE", prepare_block(df_b_rep, "REPECHAGE")))
+        tables_dict["🛟 Repechage"].append(("REPECHAGE", prepare_block(df_b_rep, "REPECHAGE")))
         
+    # 3. Quarter Final
     for qf_name in [f"Quarter-Final {i}" for i in range(1, 5)]:
-        df_b_qf = klasemen_aktif[klasemen_aktif['Status'] == qf_name].sort_values('Gate')
+        df_b_qf = klasemen_aktif[klasemen_aktif['Status'].str.startswith(qf_name, na=False)].sort_values('Gate')
         if not df_b_qf.empty:
-            blocks_to_export.append((qf_name.upper(), prepare_block(df_b_qf, "QF")))
+            tables_dict["⚡ Quarter-Final"].append((qf_name.upper(), prepare_block(df_b_qf, "QF")))
             
+    # 4. Semi Final
     for sf_name in ["Semi-Final 1", "Semi-Final 2"]:
-        df_b_sf = klasemen_aktif[klasemen_aktif['Status'] == sf_name].sort_values('Gate')
+        df_b_sf = klasemen_aktif[klasemen_aktif['Status'].str.startswith(sf_name, na=False)].sort_values('Gate')
         if not df_b_sf.empty:
-            blocks_to_export.append((sf_name.upper(), prepare_block(df_b_sf, "SF")))
+            tables_dict["⚔️ Semi-Final"].append((sf_name.upper(), prepare_block(df_b_sf, "SF")))
             
+    # 5. Multi Final
     for final_tier in FINAL_TIERS:
         df_b_f = klasemen_aktif[klasemen_aktif['Status'] == final_tier]
         if not df_b_f.empty:
-            blocks_to_export.append((final_tier.upper(), prepare_block(df_b_f, "FINAL")))
+            tables_dict["🏆 Babak Final (Podium)"].append((final_tier.upper(), prepare_block(df_b_f, "FINAL")))
 
 # TOMBOL PUBLIKASI
 col_pub, col_dl = st.columns(2)
@@ -524,12 +542,15 @@ with col_pub:
     if st.button("📢 SIMPAN & PUBLIKASI KE PENONTON", use_container_width=True):
         payload_data = {
             "kelas": selected_kelas,
-            "tables": [(t_name, df_b.to_dict(orient="records")) for t_name, df_b in blocks_to_export]
+            "tables_dict": {
+                k: [(t_name, df_b.to_dict(orient="records")) for t_name, df_b in v]
+                for k, v in tables_dict.items()
+            }
         }
         db["live_payload"] = payload_data
         with open("live_standing.json", "w") as f:
             json.dump(payload_data, f)
-        st.success("✅ Berhasil dipublikasikan! Format Bagan & Gate Start telah disesuaikan.")
+        st.success("✅ Berhasil dipublikasikan! Tampilan penonton kini otomatis terbagi per tab sesi.")
 
 with col_dl:
     output = BytesIO()
@@ -543,21 +564,22 @@ with col_dl:
         data_format = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
         
         current_row_excel = 0
-        for title_suffix, df_bracket in blocks_to_export:
-            title_text = f"{selected_kelas} {title_suffix}"
-            num_cols = len(df_bracket.columns)
-            worksheet_excel.merge_range(current_row_excel, 0, current_row_excel, num_cols - 1, title_text, title_format)
-            current_row_excel += 1
-            
-            for col_num, value in enumerate(df_bracket.columns):
-                worksheet_excel.write(current_row_excel, col_num, value, header_format)
-            current_row_excel += 1
-            
-            for row_data in df_bracket.values:
-                for col_num, value in enumerate(row_data):
-                    worksheet_excel.write(current_row_excel, col_num, str(value) if pd.notnull(value) else "", data_format)
+        for tab_name, list_tables in tables_dict.items():
+            for title_suffix, df_bracket in list_tables:
+                title_text = f"{selected_kelas} {title_suffix}"
+                num_cols = len(df_bracket.columns)
+                worksheet_excel.merge_range(current_row_excel, 0, current_row_excel, num_cols - 1, title_text, title_format)
                 current_row_excel += 1
-            current_row_excel += 1
+                
+                for col_num, value in enumerate(df_bracket.columns):
+                    worksheet_excel.write(current_row_excel, col_num, value, header_format)
+                current_row_excel += 1
+                
+                for row_data in df_bracket.values:
+                    for col_num, value in enumerate(row_data):
+                        worksheet_excel.write(current_row_excel, col_num, str(value) if pd.notnull(value) else "", data_format)
+                    current_row_excel += 1
+                current_row_excel += 1
 
     st.download_button(
         label="⬇️ DOWNLOAD EXCEL (.xlsx)", 
