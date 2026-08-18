@@ -291,8 +291,14 @@ if jumlah_grup_aktif > 2:
         st.info("ℹ️ Repechage dilewati (Grup genap).")
     elif len(rep_df) > 0:
         rep_options = ["-"] + [str(i) for i in range(1, batas_gate + 1)]
-        editor_columns_rep = {"NO": None, "Name": st.column_config.TextColumn("Nama Rider", disabled=True), "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), "Hasil Repechage": st.column_config.SelectboxColumn("Posisi Finish", options=rep_options)}
-        edited_rep = st.data_editor(rep_df[['Number plate', 'Name', 'Hasil Repechage']], column_config=editor_columns_rep, hide_index=True, key=f"rep_{selected_kelas}", use_container_width=True)
+        editor_columns_rep = {
+            "NO": None, 
+            "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), 
+            "Name": st.column_config.TextColumn("Nama Rider", disabled=True), 
+            "Hasil Repechage": st.column_config.SelectboxColumn("Posisi Finish", options=rep_options),
+            "Gate": st.column_config.TextColumn("Gate", disabled=True)
+        }
+        edited_rep = st.data_editor(rep_df[['Number plate', 'Name', 'Hasil Repechage', 'Gate']], column_config=editor_columns_rep, hide_index=True, key=f"rep_{selected_kelas}", use_container_width=True)
         
         for idx in edited_rep.index:
             hr = str(edited_rep.at[idx, 'Hasil Repechage']).strip()
@@ -315,8 +321,14 @@ if jumlah_grup_aktif > 2:
     
     if len(sf_df) > 0:
         klasemen_aktif.loc[sf_df.index, 'Status_Asli_SF'] = klasemen_aktif.loc[sf_df.index, 'Status']
-        editor_columns_sf = {"Status": st.column_config.TextColumn("Grup SF", disabled=True), "Gate": st.column_config.TextColumn("Gate", disabled=True), "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), "Name": st.column_config.TextColumn("Nama Rider", disabled=True), "Hasil Semi-Final": st.column_config.SelectboxColumn("Posisi Finish SF", options=sf_options)}
-        edited_sf = st.data_editor(sf_df[['Status', 'Gate', 'Number plate', 'Name', 'Hasil Semi-Final']], column_config=editor_columns_sf, hide_index=True, key=f"sf_{selected_kelas}", use_container_width=True)
+        editor_columns_sf = {
+            "Status": st.column_config.TextColumn("Grup SF", disabled=True), 
+            "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), 
+            "Name": st.column_config.TextColumn("Nama Rider", disabled=True), 
+            "Hasil Semi-Final": st.column_config.SelectboxColumn("Posisi Finish SF", options=sf_options),
+            "Gate": st.column_config.TextColumn("Gate", disabled=True)
+        }
+        edited_sf = st.data_editor(sf_df[['Status', 'Number plate', 'Name', 'Hasil Semi-Final', 'Gate']], column_config=editor_columns_sf, hide_index=True, key=f"sf_{selected_kelas}", use_container_width=True)
         
         for idx in edited_sf.index:
             hsf = str(edited_sf.at[idx, 'Hasil Semi-Final']).strip()
@@ -341,14 +353,12 @@ else:
     
     # KETIKA GRUP <= 2: LANGSUNG GENERATE GATE FINAL BERDASARKAN TOTAL POIN MOTO
     if len(klasemen_aktif) > 0:
-    edited_final = st.data_editor(
-        klasemen_aktif[['Number plate', 'Name', 'Status', 'Hasil Akhir', 'Gate']], 
-        column_config=editor_columns_final, 
-        hide_index=True, 
-        key=f"final_{selected_kelas}", 
-        use_container_width=True
-    )
-    klasemen_aktif['Hasil Akhir'] = edited_final['Hasil Akhir']
+        klasemen_aktif = klasemen_aktif.sort_values(by=['Total Point', 'M2_Num', 'M1_Num', 'Group'])
+        klasemen_aktif['Rank Keseluruhan'] = range(1, len(klasemen_aktif) + 1)
+        klasemen_aktif['Status'] = klasemen_aktif['Rank Keseluruhan'].apply(
+            lambda r: "Final Utama" if r <= batas_gate else ("Final Novice" if r <= batas_gate*2 else "Final Rookie")
+        )
+        klasemen_aktif['Gate'] = klasemen_aktif.groupby('Status').cumcount() + 1
 
 st.divider()
 
@@ -366,15 +376,21 @@ for kat in ["Utama", "Novice", "Rookie", "Harapan"]:
         
 editor_columns_final = {
     "Status_Order": None, "SF_Pos_Num": None, "Hasil Repechage": None, "Hasil Semi-Final": None, "NO": None,
-    "Gate": st.column_config.TextColumn("Gate Start", disabled=True),
     "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), 
     "Name": st.column_config.TextColumn("Nama Rider", disabled=True),
     "Status": st.column_config.TextColumn("Tiket / Bracket Final", disabled=True),
-    "Hasil Akhir": st.column_config.SelectboxColumn("🏅 Input Juara Podium", options=pilihan_hasil)
+    "Hasil Akhir": st.column_config.SelectboxColumn("🏅 Input Juara Podium", options=pilihan_hasil),
+    "Gate": st.column_config.TextColumn("Gate Start", disabled=True)
 }
 
 if len(klasemen_aktif) > 0:
-    edited_final = st.data_editor(klasemen_aktif[['Gate', 'Number plate', 'Name', 'Status', 'Hasil Akhir']], column_config=editor_columns_final, hide_index=True, key=f"final_{selected_kelas}", use_container_width=True)
+    edited_final = st.data_editor(
+        klasemen_aktif[['Number plate', 'Name', 'Status', 'Hasil Akhir', 'Gate']], 
+        column_config=editor_columns_final, 
+        hide_index=True, 
+        key=f"final_{selected_kelas}", 
+        use_container_width=True
+    )
     klasemen_aktif['Hasil Akhir'] = edited_final['Hasil Akhir']
 
 st.write("---")
@@ -394,20 +410,19 @@ def extract_rank(hasil):
 def prepare_block(df_filtered, block_type="MOTO"):
     if block_type == "FINAL":
         df_filtered['RankSort'] = df_filtered['Hasil Akhir'].apply(extract_rank)
-        # Jika hasil akhir sudah diisi, urutkan berdasarkan podium. Jika belum, urutkan berdasarkan gate
         has_podium = (df_filtered['Hasil Akhir'] != "-").any()
         if has_podium:
             res = df_filtered.sort_values('RankSort').copy()
         else:
             res = df_filtered.sort_values('Gate').copy()
             
-        # Gate dipindah ke urutan paling belakang
+        # Gate diletakkan di kolom paling akhir
         res = res[['Name', 'Number plate', 'Team', 'Hasil Akhir', 'Gate']]
         res.columns = ['Nama Rider', 'No. Plate', 'Komunitas', 'Hasil Podium', 'Gate']
         res['Gate'] = res['Gate'].astype(str)
         return res
     else:
-        # Gate dipindah ke urutan paling belakang
+        # Gate diletakkan di kolom paling akhir
         cols_base = ['Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Status', 'Gate']
         cols_rename = ['Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Bracket Final', 'Gate']
         res = df_filtered[cols_base].copy()
@@ -453,7 +468,7 @@ with col_pub:
         db["live_payload"] = payload_data
         with open("live_standing.json", "w") as f:
             json.dump(payload_data, f)
-        st.success("✅ Berhasil dipublikasikan! Gate Start & Klasemen sekarang terlihat lengkap.")
+        st.success("✅ Berhasil dipublikasikan! Gate Start & Klasemen sekarang terlihat lengkap di kolom paling akhir.")
 
 with col_dl:
     output = BytesIO()
