@@ -4,7 +4,35 @@ from io import BytesIO
 import json
 import os
 
-st.set_page_config(page_title="Pushbike Race Scoring System", layout="wide")
+st.set_page_config(page_title="Pushbike Race Scoring System", page_icon="🚲", layout="wide")
+
+# ==========================================
+# CUSTOM CSS UNTUK TAMPILAN PREMIUM
+# ==========================================
+st.markdown("""
+<style>
+    .header-banner {
+        text-align: center;
+        padding: 1.5rem 1rem;
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        color: white;
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .header-banner h1 {
+        color: white !important;
+        margin-bottom: 0.2rem;
+    }
+    .metric-card {
+        background: #f8f9fa;
+        border-left: 5px solid #2a5298;
+        padding: 12px 18px;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ==========================================
 # DATABASE GLOBAL (BERTAHAN DI SERVER STREAMLIT)
@@ -14,7 +42,9 @@ def get_global_database():
     return {
         "live_payload": None,
         "saved_df": None,
-        "selected_kelas": None
+        "selected_kelas": None,
+        "event_name": "BHINNEKA PUSHBIKE GRAND PRIX 2026",
+        "logo_url": "https://raw.githubusercontent.com/EventPushbikeBhinneka/pushbike-scoring/main/logo.png"
     }
 
 db = get_global_database()
@@ -31,14 +61,24 @@ with st.sidebar:
 # 1. TAMPILAN KHUSUS PENONTON / MC
 # ==========================================
 if role == "👥 Penonton (Live Score)":
-    st.title("🏆 Live Standing - Pushbike Race")
+    # BANNER HEADER & LOGO
+    col_logo, col_title = st.columns([1, 4])
+    with col_logo:
+        if db.get("logo_url"):
+            st.image(db["logo_url"], use_container_width=True)
+        else:
+            st.markdown("## 🚴‍♂️")
+    with col_title:
+        st.markdown(f"## 🏆 {db.get('event_name', 'Pushbike Race Event')}")
+        st.caption("🔴 Live Timing & Official Standings Board")
+
+    st.write("---")
     
-    col_ref, _ = st.columns([2, 8])
-    with col_ref:
-        if st.button("🔄 Refresh Data Terbaru", use_container_width=True):
+    col_btn, _ = st.columns([2, 8])
+    with col_btn:
+        if st.button("🔄 Refresh Data Real-Time", use_container_width=True):
             st.rerun()
 
-    # Cek dari memory server atau file cadangan
     live_data = db["live_payload"]
     if live_data is None and os.path.exists("live_standing.json"):
         try:
@@ -48,15 +88,20 @@ if role == "👥 Penonton (Live Score)":
             pass
 
     if live_data and live_data.get('tables'):
-        st.info(f"📢 **Kelas:** {live_data.get('kelas', '-')} | Status: Terupdate")
+        st.markdown(f"""
+        <div class="metric-card">
+            <h4 style="margin:0; color:#1e3c72;">🏁 KELAS: {live_data.get('kelas', '-')}</h4>
+            <span style="font-size:0.85rem; color:#666;">Status: Hasil Resmi Terverifikasi Juri</span>
+        </div>
+        """, unsafe_allow_html=True)
         
         for block_title, data_table in live_data.get('tables', []):
-            st.markdown(f"#### 🏁 {block_title}")
+            st.markdown(f"#### 📋 {block_title}")
             df_view = pd.DataFrame(data_table)
             st.dataframe(df_view, hide_index=True, use_container_width=True)
             st.write("")
     else:
-        st.warning("Belum ada data race yang dipublikasikan oleh panitia. Silakan tunggu update juri.")
+        st.info("ℹ️ Belum ada babak yang dipublikasikan juri untuk kelas ini.")
     
     st.stop()
 
@@ -71,11 +116,14 @@ with st.sidebar:
 
     st.success("✅ Terverifikasi sebagai Panitia")
     st.header("⚙️ Pengaturan Turnamen")
+    db["event_name"] = st.text_input("Nama Event / Judul Banner:", value=db.get("event_name", "BHINNEKA PUSHBIKE GRAND PRIX 2026"))
+    db["logo_url"] = st.text_input("URL Link Logo Event (PNG/JPG):", value=db.get("logo_url", ""))
+    
     batas_gate = st.number_input("Kapasitas Rider per Gate/Podium", min_value=2, max_value=12, value=4)
     kuota_default = st.number_input("Kuota Standar per Kelas", min_value=4, max_value=100, value=12)
     st.divider()
     
-    if st.button("🗑️ Reset Semua Data Server", help="Gunakan jika ingin memulai turnamen baru dari nol"):
+    if st.button("🗑️ Reset Semua Data Server", help="Mulai turnamen baru dari awal"):
         db["live_payload"] = None
         db["saved_df"] = None
         if os.path.exists("live_standing.json"):
@@ -86,7 +134,6 @@ st.title("🛠️ Panel Panitia - Scoring System")
 
 uploaded_file = st.file_uploader("📂 Upload Data Peserta (.xlsx / .csv)", type=["xlsx", "csv"])
 
-# Simpan data ke server memory agar tidak hilang saat ganti menu
 if uploaded_file is not None:
     try:
         if uploaded_file.name.endswith('.csv'):
@@ -115,7 +162,7 @@ def clean_moto_val(v):
 df['M1'] = df['M1'].apply(clean_moto_val)
 df['M2'] = df['M2'].apply(clean_moto_val)
 
-# FASE 1: KUALIFIKASI MOTO
+# FASE 1: MOTO
 st.header("1. 🏁 Fase 1: Kualifikasi (Moto 1 & 2)")
 kelas_list = [k for k in df['Kelas'].dropna().unique().tolist() if str(k).strip() != ""]
 
@@ -340,7 +387,7 @@ def extract_rank(hasil):
     base = 0
     if "Utama" in hasil_str: base = 0
     elif "Novice" in hasil_str: base = 100
-    elif "Rookie" in hasil_str: base = 200
+    elif "Rookie" in calculation := 200: base = 200
     elif "Harapan" in hasil_str: base = 300
     num = ''.join(filter(str.isdigit, hasil_str))
     return base + int(num) if num else 997
@@ -395,11 +442,10 @@ with col_pub:
             "kelas": selected_kelas,
             "tables": [(t_name, df_b.to_dict(orient="records")) for t_name, df_b in blocks_to_export]
         }
-        # Simpan ke memori global dan file JSON
         db["live_payload"] = payload_data
         with open("live_standing.json", "w") as f:
             json.dump(payload_data, f)
-        st.success("✅ Berhasil dipublikasikan! Penonton sekarang dapat melihatnya.")
+        st.success("✅ Berhasil dipublikasikan!")
 
 with col_dl:
     output = BytesIO()
