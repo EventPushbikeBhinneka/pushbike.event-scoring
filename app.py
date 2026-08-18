@@ -11,19 +11,6 @@ st.set_page_config(page_title="Pushbike Race Scoring System", page_icon="🚲", 
 # ==========================================
 st.markdown("""
 <style>
-    .header-banner {
-        text-align: center;
-        padding: 1.5rem 1rem;
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        color: white;
-        border-radius: 12px;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .header-banner h1 {
-        color: white !important;
-        margin-bottom: 0.2rem;
-    }
     .metric-card {
         background: #f8f9fa;
         border-left: 5px solid #2a5298;
@@ -65,7 +52,10 @@ if role == "👥 Penonton (Live Score)":
     col_logo, col_title = st.columns([1, 4])
     with col_logo:
         if db.get("logo_url"):
-            st.image(db["logo_url"], use_container_width=True)
+            try:
+                st.image(db["logo_url"], use_container_width=True)
+            except:
+                st.markdown("## 🚴‍♂️")
         else:
             st.markdown("## 🚴‍♂️")
     with col_title:
@@ -162,7 +152,7 @@ def clean_moto_val(v):
 df['M1'] = df['M1'].apply(clean_moto_val)
 df['M2'] = df['M2'].apply(clean_moto_val)
 
-# FASE 1: MOTO
+# FASE 1: KUALIFIKASI MOTO
 st.header("1. 🏁 Fase 1: Kualifikasi (Moto 1 & 2)")
 kelas_list = [k for k in df['Kelas'].dropna().unique().tolist() if str(k).strip() != ""]
 
@@ -260,7 +250,7 @@ klasemen_aktif['Status_Asli_SF'] = "-"
 
 edited_rep, edited_sf, edited_final = None, None, None
 
-# LOGIKA PEMBAGIAN ALUR
+# LOGIKA PEMBAGIAN ALUR JIKA GRUP > 2
 if jumlah_grup_aktif > 2:
     klasemen_aktif = klasemen_aktif.sort_values(by=['Group', 'Total Point', 'M2_Num', 'M1_Num'])
     klasemen_aktif['Rank di Grup'] = klasemen_aktif.groupby('Group').cumcount() + 1
@@ -387,7 +377,7 @@ def extract_rank(hasil):
     base = 0
     if "Utama" in hasil_str: base = 0
     elif "Novice" in hasil_str: base = 100
-    elif "Rookie" in calculation := 200: base = 200
+    elif "Rookie" in hasil_str: base = 200
     elif "Harapan" in hasil_str: base = 300
     num = ''.join(filter(str.isdigit, hasil_str))
     return base + int(num) if num else 997
