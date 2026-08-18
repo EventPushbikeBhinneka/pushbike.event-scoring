@@ -341,12 +341,14 @@ else:
     
     # KETIKA GRUP <= 2: LANGSUNG GENERATE GATE FINAL BERDASARKAN TOTAL POIN MOTO
     if len(klasemen_aktif) > 0:
-        klasemen_aktif = klasemen_aktif.sort_values(by=['Total Point', 'M2_Num', 'M1_Num', 'Group'])
-        klasemen_aktif['Rank Keseluruhan'] = range(1, len(klasemen_aktif) + 1)
-        klasemen_aktif['Status'] = klasemen_aktif['Rank Keseluruhan'].apply(
-            lambda r: "Final Utama" if r <= batas_gate else ("Final Novice" if r <= batas_gate*2 else "Final Rookie")
-        )
-        klasemen_aktif['Gate'] = klasemen_aktif.groupby('Status').cumcount() + 1
+    edited_final = st.data_editor(
+        klasemen_aktif[['Number plate', 'Name', 'Status', 'Hasil Akhir', 'Gate']], 
+        column_config=editor_columns_final, 
+        hide_index=True, 
+        key=f"final_{selected_kelas}", 
+        use_container_width=True
+    )
+    klasemen_aktif['Hasil Akhir'] = edited_final['Hasil Akhir']
 
 st.divider()
 
@@ -392,20 +394,22 @@ def extract_rank(hasil):
 def prepare_block(df_filtered, block_type="MOTO"):
     if block_type == "FINAL":
         df_filtered['RankSort'] = df_filtered['Hasil Akhir'].apply(extract_rank)
-        # Jika hasil akhir sudah diisi, urutkan berdasarkan podium. Jika belum, urutkan berdasarkan nomor gate
+        # Jika hasil akhir sudah diisi, urutkan berdasarkan podium. Jika belum, urutkan berdasarkan gate
         has_podium = (df_filtered['Hasil Akhir'] != "-").any()
         if has_podium:
             res = df_filtered.sort_values('RankSort').copy()
         else:
             res = df_filtered.sort_values('Gate').copy()
             
-        res = res[['Gate', 'Name', 'Number plate', 'Team', 'Hasil Akhir']]
-        res.columns = ['Gate', 'Nama Rider', 'No. Plate', 'Komunitas', 'Hasil Podium']
+        # Gate dipindah ke urutan paling belakang
+        res = res[['Name', 'Number plate', 'Team', 'Hasil Akhir', 'Gate']]
+        res.columns = ['Nama Rider', 'No. Plate', 'Komunitas', 'Hasil Podium', 'Gate']
         res['Gate'] = res['Gate'].astype(str)
         return res
     else:
-        cols_base = ['Gate', 'Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Status']
-        cols_rename = ['Gate', 'Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Bracket Final']
+        # Gate dipindah ke urutan paling belakang
+        cols_base = ['Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Status', 'Gate']
+        cols_rename = ['Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Bracket Final', 'Gate']
         res = df_filtered[cols_base].copy()
         res.columns = cols_rename
         res['Total Poin'] = res['Total Poin'].astype(int).astype(str)
