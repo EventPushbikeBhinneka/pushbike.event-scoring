@@ -118,7 +118,6 @@ with st.sidebar:
     st.header("🛠️ Kustom Format & Kategori Piala")
     batas_gate = st.number_input("Kapasitas Rider per Gate / Podium", min_value=2, max_value=12, value=10)
     
-    # PILIHAN KATEGORI PIALA YANG AKTIF DI TURNAMEN
     selected_piala = st.multiselect(
         "Kategori Piala yang Diperebutkan:",
         ["Utama", "Novice", "Rookie", "Beginner", "Newbie"],
@@ -301,17 +300,11 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
             rem_list = g_df[g_df['Rank di Grup'] > quota].index.tolist()
             rest_riders.extend(rem_list)
             
-    # ALOKASI NON-LOLOS QF/SF
+    # ALOKASI NON-LOLOS QF/SF (SEMUA DITETAPKAN SEBAGAI FINISHER)
     if rest_riders:
-        df_rest = klasemen_aktif.loc[rest_riders].sort_values(by=['Total Point', 'M2_Num', 'M1_Num'])
-        # Tentukan tier terbawah untuk rider yang tidak masuk babak gugur
-        fallback_tiers = [t for t in FINAL_TIERS if t not in ["Final Utama", "Final Novice"]]
-        if not fallback_tiers: fallback_tiers = ["Finisher"]
-        
-        for i, idx_r in enumerate(df_rest.index):
-            t_idx = min(i // batas_gate, len(fallback_tiers) - 1)
-            klasemen_aktif.at[idx_r, 'Status'] = fallback_tiers[t_idx]
-            klasemen_aktif.at[idx_r, 'Gate'] = (i % batas_gate) + 1
+        for idx_r in rest_riders:
+            klasemen_aktif.at[idx_r, 'Status'] = "Finisher"
+            klasemen_aktif.at[idx_r, 'Gate'] = "-"
 
     # PEMBAGIAN QF / SF
     if use_qf:
@@ -380,7 +373,6 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
             }
             edited_qf = st.data_editor(qf_df[['Status', 'Number plate', 'Name', 'Hasil QF', 'Gate']], column_config=editor_columns_qf, hide_index=True, key=f"qf_{selected_kelas}", use_container_width=True)
             
-            # Cek apakah turnamen memperebutkan 4 piala (Utama, Novice, Rookie, Beginner)
             four_tier_mode = all(k in selected_piala for k in ["Utama", "Novice", "Rookie", "Beginner"])
             
             for idx in edited_qf.index:
@@ -391,14 +383,11 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
                     qf_group = str(edited_qf.at[idx, 'Status'])
                     
                     if four_tier_mode:
-                        # Top 5 masuk Semi-Final A (Perebutan Utama & Novice)
                         if pos <= 5:
                             klasemen_aktif.at[idx, 'Status'] = "Semi-Final 1 (Utama/Novice)" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 2 (Utama/Novice)"
-                        # Peringkat 6-10 masuk Semi-Final B (Perebutan Rookie & Beginner)
                         else:
                             klasemen_aktif.at[idx, 'Status'] = "Semi-Final 3 (Rookie/Beginner)" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 4 (Rookie/Beginner)"
                     else:
-                        # Mode Standar / 2 Piala (Utama & Novice)
                         if pos <= 5:
                             klasemen_aktif.at[idx, 'Status'] = "Semi-Final 1" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 2"
                         else:
@@ -570,7 +559,7 @@ with col_pub:
         db["live_payload"] = payload_data
         with open("live_standing.json", "w") as f:
             json.dump(payload_data, f)
-        st.success("✅ Berhasil dipublikasikan! Format Bagan & Skema Piala telah disesuaikan.")
+        st.success("✅ Berhasil dipublikasikan! Rider non-QF otomatis berstatus Finisher.")
 
 with col_dl:
     output = BytesIO()
