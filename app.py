@@ -51,9 +51,11 @@ if role == "👥 Penonton (Live Score)":
     # BANNER HEADER & LOGO
     col_logo, col_title = st.columns([1, 4])
     with col_logo:
-        if db.get("logo_url"):
+        if os.path.exists("logo.png"):
+            st.image("logo.png", width=120)
+        elif db.get("logo_url"):
             try:
-                st.image(db["logo_url"], use_container_width=True)
+                st.image(db["logo_url"], width=120)
             except:
                 st.markdown("## 🚴‍♂️")
         else:
