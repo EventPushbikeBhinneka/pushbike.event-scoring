@@ -31,7 +31,7 @@ def get_global_database():
         "saved_df": None,
         "selected_kelas": None,
         "event_name": "BHINNEKA PUSHBIKE GRAND PRIX 2026",
-        "logo_url": "https://raw.githubusercontent.com/EventPushbikeBhinneka/pushbike-scoring/main/logo.png"
+        "logo_url": ""
     }
 
 db = get_global_database()
@@ -109,7 +109,7 @@ with st.sidebar:
     st.success("✅ Terverifikasi sebagai Panitia")
     st.header("⚙️ Pengaturan Turnamen")
     db["event_name"] = st.text_input("Nama Event / Judul Banner:", value=db.get("event_name", "BHINNEKA PUSHBIKE GRAND PRIX 2026"))
-    db["logo_url"] = st.text_input("URL Link Logo Event (PNG/JPG):", value=db.get("logo_url", ""))
+    db["logo_url"] = st.text_input("URL Link Logo Eksternal (Opsional):", value=db.get("logo_url", ""))
     
     batas_gate = st.number_input("Kapasitas Rider per Gate/Podium", min_value=2, max_value=12, value=4)
     kuota_default = st.number_input("Kuota Standar per Kelas", min_value=4, max_value=100, value=12)
@@ -339,10 +339,13 @@ else:
     st.header("3. ⚔️ Fase 3: Semi-Final")
     st.info("ℹ️ Semi-Final dilewati.")
     
+    # KETIKA GRUP <= 2: LANGSUNG GENERATE GATE FINAL BERDASARKAN TOTAL POIN MOTO
     if len(klasemen_aktif) > 0:
         klasemen_aktif = klasemen_aktif.sort_values(by=['Total Point', 'M2_Num', 'M1_Num', 'Group'])
         klasemen_aktif['Rank Keseluruhan'] = range(1, len(klasemen_aktif) + 1)
-        klasemen_aktif['Status'] = klasemen_aktif['Rank Keseluruhan'].apply(lambda r: "Final Utama" if r <= batas_gate else ("Final Novice" if r <= batas_gate*2 else "Final Rookie"))
+        klasemen_aktif['Status'] = klasemen_aktif['Rank Keseluruhan'].apply(
+            lambda r: "Final Utama" if r <= batas_gate else ("Final Novice" if r <= batas_gate*2 else "Final Rookie")
+        )
         klasemen_aktif['Gate'] = klasemen_aktif.groupby('Status').cumcount() + 1
 
 st.divider()
@@ -361,13 +364,15 @@ for kat in ["Utama", "Novice", "Rookie", "Harapan"]:
         
 editor_columns_final = {
     "Status_Order": None, "SF_Pos_Num": None, "Hasil Repechage": None, "Hasil Semi-Final": None, "NO": None,
-    "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), "Name": st.column_config.TextColumn("Nama Rider", disabled=True),
-    "Status": st.column_config.TextColumn("Tiket / Bracket Final", disabled=True), "Gate": st.column_config.TextColumn("No. Gate", disabled=True),
+    "Gate": st.column_config.TextColumn("Gate Start", disabled=True),
+    "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), 
+    "Name": st.column_config.TextColumn("Nama Rider", disabled=True),
+    "Status": st.column_config.TextColumn("Tiket / Bracket Final", disabled=True),
     "Hasil Akhir": st.column_config.SelectboxColumn("🏅 Input Juara Podium", options=pilihan_hasil)
 }
 
 if len(klasemen_aktif) > 0:
-    edited_final = st.data_editor(klasemen_aktif[['Number plate', 'Name', 'Status', 'Gate', 'Hasil Akhir']], column_config=editor_columns_final, hide_index=True, key=f"final_{selected_kelas}", use_container_width=True)
+    edited_final = st.data_editor(klasemen_aktif[['Gate', 'Number plate', 'Name', 'Status', 'Hasil Akhir']], column_config=editor_columns_final, hide_index=True, key=f"final_{selected_kelas}", use_container_width=True)
     klasemen_aktif['Hasil Akhir'] = edited_final['Hasil Akhir']
 
 st.write("---")
@@ -387,13 +392,20 @@ def extract_rank(hasil):
 def prepare_block(df_filtered, block_type="MOTO"):
     if block_type == "FINAL":
         df_filtered['RankSort'] = df_filtered['Hasil Akhir'].apply(extract_rank)
-        res = df_filtered.sort_values('RankSort').copy()
-        res = res[['Name', 'Number plate', 'Team', 'Hasil Akhir']]
-        res.columns = ['Nama Rider', 'No. Plate', 'Komunitas', 'Hasil Podium']
+        # Jika hasil akhir sudah diisi, urutkan berdasarkan podium. Jika belum, urutkan berdasarkan nomor gate
+        has_podium = (df_filtered['Hasil Akhir'] != "-").any()
+        if has_podium:
+            res = df_filtered.sort_values('RankSort').copy()
+        else:
+            res = df_filtered.sort_values('Gate').copy()
+            
+        res = res[['Gate', 'Name', 'Number plate', 'Team', 'Hasil Akhir']]
+        res.columns = ['Gate', 'Nama Rider', 'No. Plate', 'Komunitas', 'Hasil Podium']
+        res['Gate'] = res['Gate'].astype(str)
         return res
     else:
-        cols_base = ['Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Status', 'Gate']
-        cols_rename = ['Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Bracket Final', 'Gate']
+        cols_base = ['Gate', 'Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Status']
+        cols_rename = ['Gate', 'Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Bracket Final']
         res = df_filtered[cols_base].copy()
         res.columns = cols_rename
         res['Total Poin'] = res['Total Poin'].astype(int).astype(str)
@@ -437,7 +449,7 @@ with col_pub:
         db["live_payload"] = payload_data
         with open("live_standing.json", "w") as f:
             json.dump(payload_data, f)
-        st.success("✅ Berhasil dipublikasikan!")
+        st.success("✅ Berhasil dipublikasikan! Gate Start & Klasemen sekarang terlihat lengkap.")
 
 with col_dl:
     output = BytesIO()
