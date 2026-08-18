@@ -268,6 +268,12 @@ grup_valid = sorted([g for g in klasemen_aktif['Group'].unique() if str(g) not i
 jumlah_grup_aktif = len(grup_valid)
 total_peserta_aktif = len(klasemen_aktif)
 
+# PASTIKAN KOLOM BERSIFAT STRING/OBJECT AGAR TIDAK TYPE ERROR
+klasemen_aktif['Status'] = "-"
+klasemen_aktif['Gate'] = "-"
+klasemen_aktif['Status'] = klasemen_aktif['Status'].astype(str)
+klasemen_aktif['Gate'] = klasemen_aktif['Gate'].astype(str)
+
 # DETEKSI ALUR
 use_qf = False
 if skema_alur == "Gunakan Quarter-Final (QF -> SF -> Final)":
@@ -300,35 +306,35 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
             rem_list = g_df[g_df['Rank di Grup'] > quota].index.tolist()
             rest_riders.extend(rem_list)
             
-    # ALOKASI NON-LOLOS QF/SF (SEMUA DITETAPKAN SEBAGAI FINISHER)
+    # SEMUA RIDER DI LUAR KUOTA QF & REPECHAGE LANGSUNG MENJADI FINISHER
     if rest_riders:
         for idx_r in rest_riders:
-            klasemen_aktif.at[idx_r, 'Status'] = "Finisher"
-            klasemen_aktif.at[idx_r, 'Gate'] = "-"
+            klasemen_aktif.loc[idx_r, 'Status'] = "Finisher"
+            klasemen_aktif.loc[idx_r, 'Gate'] = "-"
 
     # PEMBAGIAN QF / SF
     if use_qf:
         for i, idx_r in enumerate(pass_riders):
             qf_num = (i % 4) + 1
-            klasemen_aktif.at[idx_r, 'Status'] = f"Quarter-Final {qf_num}"
-            klasemen_aktif.at[idx_r, 'Gate'] = (i // 4) + 1
+            klasemen_aktif.loc[idx_r, 'Status'] = f"Quarter-Final {qf_num}"
+            klasemen_aktif.loc[idx_r, 'Gate'] = str((i // 4) + 1)
             
         if rep_riders:
             for i, idx_r in enumerate(rep_riders):
-                klasemen_aktif.at[idx_r, 'Status'] = "Repechage"
-                klasemen_aktif.at[idx_r, 'Gate'] = i + 1
+                klasemen_aktif.loc[idx_r, 'Status'] = "Repechage"
+                klasemen_aktif.loc[idx_r, 'Gate'] = str(i + 1)
     else:
         for i, idx_r in enumerate(pass_riders):
             sf_num = (i % 2) + 1
-            klasemen_aktif.at[idx_r, 'Status'] = f"Semi-Final {sf_num}"
-            klasemen_aktif.at[idx_r, 'Gate'] = (i // 2) + 1
+            klasemen_aktif.loc[idx_r, 'Status'] = f"Semi-Final {sf_num}"
+            klasemen_aktif.loc[idx_r, 'Gate'] = str((i // 2) + 1)
             
         if rep_riders:
             for i, idx_r in enumerate(rep_riders):
-                klasemen_aktif.at[idx_r, 'Status'] = "Repechage"
-                klasemen_aktif.at[idx_r, 'Gate'] = i + 1
+                klasemen_aktif.loc[idx_r, 'Status'] = "Repechage"
+                klasemen_aktif.loc[idx_r, 'Gate'] = str(i + 1)
 
-    klasemen_aktif['Status_Moto'] = klasemen_aktif['Status']
+    klasemen_aktif['Status_Moto'] = klasemen_aktif['Status'].astype(str)
 
     # FASE 2: REPECHAGE
     rep_df = klasemen_aktif[klasemen_aktif['Status'] == 'Repechage'].copy().sort_values('Gate')
@@ -346,16 +352,16 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
         
         for idx in edited_rep.index:
             hr = str(edited_rep.at[idx, 'Hasil Repechage']).strip()
-            klasemen_aktif.at[idx, 'Hasil Repechage'] = hr
+            klasemen_aktif.loc[idx, 'Hasil Repechage'] = hr
             if hr.isdigit():
                 pos = int(hr)
                 if use_qf:
-                    if pos <= 4: klasemen_aktif.at[idx, 'Status'] = f"Quarter-Final {pos}"
-                    else: klasemen_aktif.at[idx, 'Status'] = "Finisher"
+                    if pos <= 4: klasemen_aktif.loc[idx, 'Status'] = f"Quarter-Final {pos}"
+                    else: klasemen_aktif.loc[idx, 'Status'] = "Finisher"
                 else:
-                    if pos == 1: klasemen_aktif.at[idx, 'Status'] = "Semi-Final 1"
-                    elif pos == 2: klasemen_aktif.at[idx, 'Status'] = "Semi-Final 2"
-                    else: klasemen_aktif.at[idx, 'Status'] = "Finisher"
+                    if pos == 1: klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1"
+                    elif pos == 2: klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 2"
+                    else: klasemen_aktif.loc[idx, 'Status'] = "Finisher"
         st.divider()
 
     # FASE 3A: QUARTER-FINAL (40 BESAR)
@@ -377,21 +383,21 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
             
             for idx in edited_qf.index:
                 hqf = str(edited_qf.at[idx, 'Hasil QF']).strip()
-                klasemen_aktif.at[idx, 'Hasil QF'] = hqf
+                klasemen_aktif.loc[idx, 'Hasil QF'] = hqf
                 if hqf.isdigit():
                     pos = int(hqf)
                     qf_group = str(edited_qf.at[idx, 'Status'])
                     
                     if four_tier_mode:
                         if pos <= 5:
-                            klasemen_aktif.at[idx, 'Status'] = "Semi-Final 1 (Utama/Novice)" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 2 (Utama/Novice)"
+                            klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1 (Utama/Novice)" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 2 (Utama/Novice)"
                         else:
-                            klasemen_aktif.at[idx, 'Status'] = "Semi-Final 3 (Rookie/Beginner)" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 4 (Rookie/Beginner)"
+                            klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 3 (Rookie/Beginner)" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 4 (Rookie/Beginner)"
                     else:
                         if pos <= 5:
-                            klasemen_aktif.at[idx, 'Status'] = "Semi-Final 1" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 2"
+                            klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 2"
                         else:
-                            klasemen_aktif.at[idx, 'Status'] = "Finisher"
+                            klasemen_aktif.loc[idx, 'Status'] = "Finisher"
             st.divider()
 
     # FASE 3B: SEMI-FINAL
@@ -410,21 +416,21 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
         
         for idx in edited_sf.index:
             hsf = str(edited_sf.at[idx, 'Hasil Semi-Final']).strip()
-            klasemen_aktif.at[idx, 'Hasil Semi-Final'] = hsf
+            klasemen_aktif.loc[idx, 'Hasil Semi-Final'] = hsf
             if hsf.isdigit():
                 pos = int(hsf)
                 sf_type = str(edited_sf.at[idx, 'Status'])
                 
                 if "Rookie/Beginner" in sf_type:
-                    klasemen_aktif.at[idx, 'Status'] = "Final Rookie" if pos <= 5 else ("Final Beginner" if "Beginner" in selected_piala else "Finisher")
+                    klasemen_aktif.loc[idx, 'Status'] = "Final Rookie" if pos <= 5 else ("Final Beginner" if "Beginner" in selected_piala else "Finisher")
                 else:
-                    klasemen_aktif.at[idx, 'Status'] = "Final Utama" if pos <= 5 else ("Final Novice" if "Novice" in selected_piala else "Finisher")
+                    klasemen_aktif.loc[idx, 'Status'] = "Final Utama" if pos <= 5 else ("Final Novice" if "Novice" in selected_piala else "Finisher")
                 
         for target_final in FINAL_TIERS:
             mask = klasemen_aktif['Status'] == target_final
             if mask.sum() > 0:
                 df_temp = klasemen_aktif[mask].sort_values(by=['Total Point', 'M2_Num', 'M1_Num'])
-                klasemen_aktif.loc[df_temp.index, 'Gate'] = range(1, len(df_temp) + 1)
+                klasemen_aktif.loc[df_temp.index, 'Gate'] = [str(x) for x in range(1, len(df_temp) + 1)]
         st.divider()
 
 else:
@@ -432,9 +438,9 @@ else:
         klasemen_aktif = klasemen_aktif.sort_values(by=['Total Point', 'M2_Num', 'M1_Num', 'Group'])
         for i, idx_r in enumerate(klasemen_aktif.index):
             t_idx = min(i // batas_gate, len(FINAL_TIERS) - 1)
-            klasemen_aktif.at[idx_r, 'Status'] = FINAL_TIERS[t_idx]
-            klasemen_aktif.at[idx_r, 'Gate'] = (i % batas_gate) + 1
-        klasemen_aktif['Status_Moto'] = klasemen_aktif['Status']
+            klasemen_aktif.loc[idx_r, 'Status'] = FINAL_TIERS[t_idx]
+            klasemen_aktif.loc[idx_r, 'Gate'] = str((i % batas_gate) + 1)
+        klasemen_aktif['Status_Moto'] = klasemen_aktif['Status'].astype(str)
 
 # FASE 4: FINAL & INPUT PODIUM
 st.header("4. 🏆 Fase 4: Hasil Final & Input Podium")
