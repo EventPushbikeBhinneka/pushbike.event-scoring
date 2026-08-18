@@ -1,14 +1,59 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-import math
+import json
+import os
 
-st.set_page_config(page_title="Pushbike Race System", layout="wide")
+st.set_page_config(page_title="Pushbike Race Scoring System", layout="wide")
+
+FILE_LIVE_DATA = "live_standing.json"
 
 # ==========================================
-# PENGATURAN TURNAMEN
+# NAVIGASI ROLE / PENGGUNA
 # ==========================================
 with st.sidebar:
+    st.header("👤 Akses Pengguna")
+    role = st.radio("Pilih Akses:", ["👥 Penonton (Live Score)", "🔑 Panitia / Juri (Input Skor)"])
+    st.divider()
+
+# ==========================================
+# 1. TAMPILAN KHUSUS PENONTON / MC
+# ==========================================
+if role == "👥 Penonton (Live Score)":
+    st.title("🏆 Live Standing - Pushbike Race")
+    
+    if st.button("🔄 Refresh Data Terbaru"):
+        st.rerun()
+
+    if os.path.exists(FILE_LIVE_DATA):
+        try:
+            with open(FILE_LIVE_DATA, "r") as f:
+                payload = json.load(f)
+            
+            st.info(f"📢 **Kelas Terakhir Diperbarui:** {payload.get('kelas', '-')}")
+            
+            for block_title, data_table in payload.get('tables', []):
+                st.markdown(f"#### 🏁 {block_title}")
+                df_view = pd.DataFrame(data_table)
+                st.dataframe(df_view, hide_index=True, use_container_width=True)
+                st.write("")
+        except Exception as e:
+            st.error(f"Gagal memuat data live: {e}")
+    else:
+        st.warning("Belum ada data race yang dipublikasikan oleh panitia. Silakan tunggu update juri.")
+    
+    st.stop()
+
+# ==========================================
+# 2. TAMPILAN ADMIN / PANITIA (DILINDUNGI PIN)
+# ==========================================
+with st.sidebar:
+    pin = st.text_input("Masukkan PIN Panitia:", type="password")
+    if pin != "1234":  # Ganti "1234" dengan PIN pilihan Anda
+        st.error("Masukkan PIN yang benar untuk menginput skor.")
+        st.stop()
+
+    st.success("✅ Terverifikasi sebagai Panitia")
     st.header("⚙️ Pengaturan Turnamen")
     batas_gate = st.number_input("Kapasitas Rider per Gate/Podium", min_value=2, max_value=12, value=4)
     kuota_default = st.number_input("Kuota Standar per Kelas", min_value=4, max_value=100, value=12)
@@ -17,20 +62,16 @@ with st.sidebar:
     st.header("📋 Pengaturan Publikasi")
     fase_tampilan = st.selectbox(
         "Fase Live Score yang Ditampilkan:",
-        ["Otomatis (Ikuti Alur)", "Pembagian Grup (Start List)", "Hanya Moto", "Hanya Repechage", "Hanya Semi-Final", "Hanya Final", "Semua Fase (Summary Final)"],
-        help="Otomatis akan mendeteksi fase terakhir yang sedang Anda input."
+        ["Otomatis (Ikuti Alur)", "Pembagian Grup (Start List)", "Hanya Moto", "Hanya Repechage", "Hanya Semi-Final", "Hanya Final", "Semua Fase (Summary Final)"]
     )
     st.divider()
 
-st.title("🏆 Pushbike Race Scoring System")
+st.title("🛠️ Panel Panitia - Scoring System")
 
-# ==========================================
-# INPUT DATA VIA FILE EXCEL / CSV (TANPA GOOGLE SHEETS)
-# ==========================================
 uploaded_file = st.file_uploader("📂 Upload Data Peserta (File Excel .xlsx atau CSV)", type=["xlsx", "csv"])
 
 if uploaded_file is None:
-    st.info("Silakan unggah file Excel/CSV data peserta terlebih dahulu untuk memulai perhitungan.")
+    st.info("Silakan unggah file data peserta untuk mulai mengolah nilai.")
     st.stop()
 
 try:
@@ -57,14 +98,12 @@ except Exception as e:
     st.error(f"Gagal membaca file: {e}")
     st.stop()
 
-# ==========================================
-# FASE 1: KUALIFIKASI MOTO (SISTEM PER GRUP)
-# ==========================================
+# FASE 1: KUALIFIKASI MOTO
 st.header("1. 🏁 Fase 1: Kualifikasi (Moto 1 & 2)")
 kelas_list = [k for k in df['Kelas'].dropna().unique().tolist() if str(k).strip() != ""]
 
 if not kelas_list:
-    st.warning("Kolom 'Kelas' tidak ditemukan atau kosong pada data peserta.")
+    st.warning("Kolom 'Kelas' tidak ditemukan.")
     st.stop()
 
 selected_kelas = st.selectbox("Pilih Kelas:", kelas_list)
@@ -73,15 +112,13 @@ df_kelas = df[df['Kelas'] == selected_kelas].copy()
 grup_list = sorted([g for g in df_kelas['Group'].unique() if str(g).strip() not in ["", "-", "NAN", "None", "nan"]])
 
 mode_input_moto = st.radio(
-    "🚥 Mode Fokus Input (Gunakan jika Race Dipercepat):", 
+    "🚥 Mode Fokus Input:", 
     ["Tampilkan Semua (M1 & M2)", "Fokus Input Moto 1 Saja", "Fokus Input Moto 2 Saja"], 
     horizontal=True
 )
 
 edited_motos = []
 moto_errors = []
-
-st.markdown("##### 📝 Input Poin Moto")
 
 for g in grup_list:
     df_g = df_kelas[df_kelas['Group'] == g].copy()
@@ -127,9 +164,9 @@ for g in grup_list:
     m2_vals = [v for v in edited_g['M2'].astype(str) if v not in ["-", "DNS", "DNF", "nan", ""]]
     
     if len(m1_vals) != len(set(m1_vals)): 
-        moto_errors.append(f"Grup {g} - Moto 1: Ditemukan poin ganda! Angka Finish tidak boleh sama.")
+        moto_errors.append(f"Grup {g} - Moto 1: Ditemukan nomor posisi sama.")
     if len(m2_vals) != len(set(m2_vals)): 
-        moto_errors.append(f"Grup {g} - Moto 2: Ditemukan poin ganda! Angka Finish tidak boleh sama.")
+        moto_errors.append(f"Grup {g} - Moto 2: Ditemukan nomor posisi sama.")
         
     edited_g['M1_Num'] = edited_g['M1'].apply(lambda x: jml_rider + 2 if x in ['DNS', 'DNF'] else (int(x) if str(x).isdigit() else 0))
     edited_g['M2_Num'] = edited_g['M2'].apply(lambda x: jml_rider + 2 if x in ['DNS', 'DNF'] else (int(x) if str(x).isdigit() else 0))
@@ -159,7 +196,7 @@ klasemen_aktif['Status_Asli_SF'] = "-"
 
 edited_rep, edited_sf, edited_final = None, None, None
 
-# LOGIKA PEMBAGIAN ALUR JIKA GRUP > 2
+# ALUR LANJUTAN (REPECHAGE & SEMI FINAL JIKA GRUP > 2)
 if jumlah_grup_aktif > 2:
     klasemen_aktif = klasemen_aktif.sort_values(by=['Group', 'Total Point', 'M2_Num', 'M1_Num'])
     klasemen_aktif['Rank di Grup'] = klasemen_aktif.groupby('Group').cumcount() + 1
@@ -191,11 +228,11 @@ if jumlah_grup_aktif > 2:
 
     klasemen_aktif['Status_Asli_Rep'] = klasemen_aktif['Status']
 
-    st.header("2. 🛟 Fase 2: Repechage (Kesempatan Terakhir)")
+    st.header("2. 🛟 Fase 2: Repechage")
     rep_df = klasemen_aktif[klasemen_aktif['Status'] == 'Repechage'].copy().sort_values('Gate')
     
     if jumlah_grup_aktif % 2 == 0:
-        st.info("ℹ️ Fase Repechage **Dilewati/Skip** karena jumlah grup **Genap**. Semua slot Semi-Final langsung diisi oleh pembalap dari fase Moto.")
+        st.info("ℹ️ Repechage dilewati (Jumlah grup genap).")
     elif len(rep_df) > 0:
         rep_options = ["-"] + [str(i) for i in range(1, batas_gate + 1)]
         editor_columns_rep = {"NO": None, "Name": st.column_config.TextColumn("Nama Rider", disabled=True), "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), "Hasil Repechage": st.column_config.SelectboxColumn("Posisi Finish", options=rep_options)}
@@ -222,7 +259,6 @@ if jumlah_grup_aktif > 2:
     
     if len(sf_df) > 0:
         klasemen_aktif.loc[sf_df.index, 'Status_Asli_SF'] = klasemen_aktif.loc[sf_df.index, 'Status']
-        
         editor_columns_sf = {"Status": st.column_config.TextColumn("Grup SF", disabled=True), "Gate": st.column_config.TextColumn("Gate", disabled=True), "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), "Name": st.column_config.TextColumn("Nama Rider", disabled=True), "Hasil Semi-Final": st.column_config.SelectboxColumn("Posisi Finish SF", options=sf_options)}
         edited_sf = st.data_editor(sf_df[['Status', 'Gate', 'Number plate', 'Name', 'Hasil Semi-Final']], column_config=editor_columns_sf, hide_index=True, use_container_width=True)
         
@@ -239,14 +275,13 @@ if jumlah_grup_aktif > 2:
             if mask.sum() > 0:
                 df_temp = klasemen_aktif[mask].sort_values(by=['SF_Pos_Num', 'Total Point', 'M2_Num', 'M1_Num'])
                 klasemen_aktif.loc[df_temp.index, 'Gate'] = range(1, len(df_temp) + 1)
-
 else:
-    st.header("2. 🛟 Fase 2: Repechage (Kesempatan Terakhir)")
-    st.info("ℹ️ Fase Repechage **Dilewati/Skip** karena jumlah grup hanya 1 atau 2.")
+    st.header("2. 🛟 Fase 2: Repechage")
+    st.info("ℹ️ Fase Repechage dilewati.")
     st.divider()
 
-    st.header("3. ⚔️ Fase 3: Balap Semi-Final")
-    st.info("ℹ️ Fase Semi-Final **Dilewati/Skip**. Pembalap langsung diurutkan menuju **Final Utama/Novice**.")
+    st.header("3. ⚔️ Fase 3: Semi-Final")
+    st.info("ℹ️ Fase Semi-Final dilewati. Langsung ke Final.")
     
     if len(klasemen_aktif) > 0:
         klasemen_aktif = klasemen_aktif.sort_values(by=['Total Point', 'M2_Num', 'M1_Num', 'Group'])
@@ -256,9 +291,7 @@ else:
 
 st.divider()
 
-# ==========================================
-# FASE 4: INPUT HASIL AKHIR (PODIUM)
-# ==========================================
+# FASE 4: FINAL
 st.header("4. 🏆 Fase 4: Hasil Final & Input Podium")
 
 status_order = {"Final Utama": 1, "Final Novice": 2, "Final Rookie": 3, "Semi-Final 1": 4, "Semi-Final 2": 5, "Repechage": 6}
@@ -283,12 +316,7 @@ if len(klasemen_aktif) > 0:
 
 st.write("---")
 
-# ==========================================
-# LOGIKA PREVIEW & EXCEL DOWNLOAD
-# ==========================================
-st.subheader("⚙️ Publikasi & Download Hasil")
-tampilkan_gate_publikasi = st.checkbox("Tampilkan Angka Gate di Hasil", value=False)
-
+# PERSIAPAN BLOK DATA
 def extract_rank(hasil):
     hasil_str = str(hasil).strip()
     if pd.isna(hasil) or hasil_str == "-" or hasil_str == "None": return 999
@@ -301,7 +329,7 @@ def extract_rank(hasil):
     num = ''.join(filter(str.isdigit, hasil_str))
     return base + int(num) if num else 997
 
-def prepare_block(df_filtered, block_type="MOTO", tampil_gate=False):
+def prepare_block(df_filtered, block_type="MOTO"):
     if block_type == "FINAL":
         df_filtered['RankSort'] = df_filtered['Hasil Akhir'].apply(extract_rank)
         res = df_filtered.sort_values('RankSort').copy()
@@ -315,7 +343,6 @@ def prepare_block(df_filtered, block_type="MOTO", tampil_gate=False):
         res.columns = cols_rename
         res['Total Poin'] = res['Total Poin'].astype(int).astype(str)
         res['Gate'] = res['Gate'].astype(str)
-        if not tampil_gate: res['Gate'] = ""
         return res
 
 blocks_to_export = []
@@ -323,59 +350,71 @@ blocks_to_export = []
 if not klasemen_aktif.empty:
     for g in grup_valid:
         df_g = klasemen_aktif[klasemen_aktif['Group'] == g].sort_values(by=['Total Point', 'M2_Num', 'M1_Num'])
-        blocks_to_export.append((f"MOTO - GRUP {g}", prepare_block(df_g, "MOTO", tampilkan_gate_publikasi)))
+        blocks_to_export.append((f"MOTO - GRUP {g}", prepare_block(df_g, "MOTO")))
         
     df_b_rep = klasemen_aktif[klasemen_aktif['Status_Asli_Rep'] == "Repechage"].sort_values('Gate')
     if not df_b_rep.empty:
-        b_rep_prepared = prepare_block(df_b_rep, "REPECHAGE", tampilkan_gate_publikasi)
+        b_rep_prepared = prepare_block(df_b_rep, "REPECHAGE")
         b_rep_prepared['Bracket Final'] = "Repechage"
         blocks_to_export.append(("REPECHAGE", b_rep_prepared))
         
     for b in ["Semi-Final 1", "Semi-Final 2"]:
         df_b_sf = klasemen_aktif[klasemen_aktif['Status_Asli_SF'] == b].sort_values('Gate')
         if not df_b_sf.empty:
-            b_sf_prepared = prepare_block(df_b_sf, "SEMI-FINAL", tampilkan_gate_publikasi)
+            b_sf_prepared = prepare_block(df_b_sf, "SEMI-FINAL")
             b_sf_prepared['Bracket Final'] = b
             blocks_to_export.append((b.upper(), b_sf_prepared))
             
     for b in ["Final Utama", "Final Novice", "Final Rookie", "Final Harapan"]:
         df_b_f = klasemen_aktif[klasemen_aktif['Status'] == b]
         if not df_b_f.empty:
-            blocks_to_export.append((b.upper(), prepare_block(df_b_f, "FINAL", tampilkan_gate_publikasi)))
+            blocks_to_export.append((b.upper(), prepare_block(df_b_f, "FINAL")))
 
-# Download Rekap Excel
-output = BytesIO()
-with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-    workbook = writer.book
-    worksheet_excel = workbook.add_worksheet('Hasil Race')
-    worksheet_excel.hide_gridlines(2)
-    
-    title_format = workbook.add_format({'bold': True, 'bg_color': '#E0E0E0', 'align': 'center', 'valign': 'vcenter', 'border': 1})
-    header_format = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1})
-    data_format = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
-    
-    current_row_excel = 0
-    for title_suffix, df_bracket in blocks_to_export:
-        title_text = f"{selected_kelas} {title_suffix}"
-        num_cols = len(df_bracket.columns)
+# TOMBOL PUBLIKASI & DOWNLOAD
+col_pub, col_dl = st.columns(2)
+
+with col_pub:
+    if st.button("📢 SIMPAN & PUBLIKASI KE PENONTON", use_container_width=True):
+        payload_data = {
+            "kelas": selected_kelas,
+            "tables": [(t_name, df_b.to_dict(orient="records")) for t_name, df_b in blocks_to_export]
+        }
+        with open(FILE_LIVE_DATA, "w") as f:
+            json.dump(payload_data, f)
+        st.success("✅ Berhasil dipublikasikan! Penonton sekarang dapat melihat tabel ini secara real-time.")
+
+with col_dl:
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        workbook = writer.book
+        worksheet_excel = workbook.add_worksheet('Hasil Race')
+        worksheet_excel.hide_gridlines(2)
         
-        worksheet_excel.merge_range(current_row_excel, 0, current_row_excel, num_cols - 1, title_text, title_format)
-        current_row_excel += 1
+        title_format = workbook.add_format({'bold': True, 'bg_color': '#E0E0E0', 'align': 'center', 'valign': 'vcenter', 'border': 1})
+        header_format = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1})
+        data_format = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
         
-        for col_num, value in enumerate(df_bracket.columns):
-            worksheet_excel.write(current_row_excel, col_num, value, header_format)
-        current_row_excel += 1
-        
-        for row_data in df_bracket.values:
-            for col_num, value in enumerate(row_data):
-                worksheet_excel.write(current_row_excel, col_num, str(value) if pd.notnull(value) else "", data_format)
+        current_row_excel = 0
+        for title_suffix, df_bracket in blocks_to_export:
+            title_text = f"{selected_kelas} {title_suffix}"
+            num_cols = len(df_bracket.columns)
+            worksheet_excel.merge_range(current_row_excel, 0, current_row_excel, num_cols - 1, title_text, title_format)
             current_row_excel += 1
-        current_row_excel += 1
+            
+            for col_num, value in enumerate(df_bracket.columns):
+                worksheet_excel.write(current_row_excel, col_num, value, header_format)
+            current_row_excel += 1
+            
+            for row_data in df_bracket.values:
+                for col_num, value in enumerate(row_data):
+                    worksheet_excel.write(current_row_excel, col_num, str(value) if pd.notnull(value) else "", data_format)
+                current_row_excel += 1
+            current_row_excel += 1
 
-st.download_button(
-    label="⬇️ DOWNLOAD REKAP HASIL EXCEL (.xlsx)", 
-    data=output.getvalue(), 
-    file_name=f"Hasil_{selected_kelas}.xlsx", 
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
-    use_container_width=True
-)
+    st.download_button(
+        label="⬇️ DOWNLOAD EXCEL (.xlsx)", 
+        data=output.getvalue(), 
+        file_name=f"Hasil_{selected_kelas}.xlsx", 
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+        use_container_width=True
+    )
