@@ -20,19 +20,29 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# DATABASE GLOBAL
+# DATABASE GLOBAL & SISTEM DRAFT
 # ==========================================
 @st.cache_resource
 def get_global_database():
     return {
         "live_payload": None,
         "saved_df": None,
-        "selected_kelas": None,
         "event_name": "BHINNEKA RACING FEST",
         "logo_url": ""
     }
 
 db = get_global_database()
+
+# Load Draft otomatis jika database server baru restart
+if db["saved_df"] is None and os.path.exists("draft_turnamen.json"):
+    try:
+        with open("draft_turnamen.json", "r") as f:
+            draft_raw = json.load(f)
+            db["saved_df"] = pd.DataFrame(draft_raw.get("df_records", []))
+            db["event_name"] = draft_raw.get("event_name", db["event_name"])
+            db["logo_url"] = draft_raw.get("logo_url", db["logo_url"])
+    except:
+        pass
 
 # ==========================================
 # NAVIGASI ROLE
@@ -138,13 +148,13 @@ with st.sidebar:
     if st.button("🗑️ Reset Semua Data Server"):
         db["live_payload"] = None
         db["saved_df"] = None
-        if os.path.exists("live_standing.json"):
-            os.remove("live_standing.json")
+        if os.path.exists("live_standing.json"): os.remove("live_standing.json")
+        if os.path.exists("draft_turnamen.json"): os.remove("draft_turnamen.json")
         st.rerun()
 
 st.title("🛠️ Panel Panitia - Scoring System")
 
-uploaded_file = st.file_uploader("📂 Upload Data Peserta (.xlsx / .csv)", type=["xlsx", "csv"])
+uploaded_file = st.file_uploader("📂 Upload Data Peserta Baru (.xlsx / .csv)", type=["xlsx", "csv"])
 
 if uploaded_file is not None:
     try:
@@ -152,17 +162,18 @@ if uploaded_file is not None:
             db["saved_df"] = pd.read_csv(uploaded_file)
         else:
             db["saved_df"] = pd.read_excel(uploaded_file)
+        st.success("File baru berhasil diunggah!")
     except Exception as e:
         st.error(f"Gagal membaca file upload: {e}")
 
 if db["saved_df"] is None:
-    st.info("Silakan unggah file data peserta terlebih dahulu.")
+    st.info("Silakan unggah file data peserta terlebih dahulu atau gunakan data yang tersimpan.")
     st.stop()
 
 df = db["saved_df"].copy()
 df.columns = df.columns.str.strip()
 
-for col in ['Group', 'Team', 'Number plate', 'M1', 'M2', 'Hasil QF', 'Hasil Repechage', 'Hasil Semi-Final', 'Hasil Akhir']:
+for col in ['Group', 'Team', 'Number plate', 'Gate M1', 'Gate M2', 'M1', 'M2', 'Hasil QF', 'Hasil Repechage', 'Hasil Semi-Final', 'Hasil Akhir']:
     if col not in df.columns: df[col] = "-"
         
 def clean_moto_val(v):
@@ -187,11 +198,22 @@ df_kelas = df[df['Kelas'] == selected_kelas].copy()
 
 grup_list = sorted([g for g in df_kelas['Group'].unique() if str(g).strip() not in ["", "-", "NAN", "None", "nan"]])
 
-mode_input_moto = st.radio(
-    "🚥 Mode Fokus Input:", 
-    ["Tampilkan Semua (M1 & M2)", "Fokus Input Moto 1 Saja", "Fokus Input Moto 2 Saja"], 
-    horizontal=True
-)
+col_m_mode, col_m_btn = st.columns([3, 2])
+with col_m_mode:
+    mode_input_moto = st.radio(
+        "🚥 Mode Fokus Input:", 
+        ["Tampilkan Semua (M1 & M2)", "Fokus Input Moto 1 Saja", "Fokus Input Moto 2 Saja"], 
+        horizontal=True
+    )
+with col_m_btn:
+    if st.button("🎲 Auto Susun Silang Gate M1/M2 (Default)"):
+        for g in grup_list:
+            sub_idx = df_kelas[df_kelas['Group'] == g].index
+            jml = len(sub_idx)
+            df.loc[sub_idx, 'Gate M1'] = [str(i) for i in range(1, jml + 1)]
+            df.loc[sub_idx, 'Gate M2'] = [str(x+1 if x%2!=0 and x<jml else (x-1 if x%2==0 else x)) for x in range(1, jml + 1)]
+        db["saved_df"] = df
+        st.rerun()
 
 edited_motos = []
 moto_errors = []
@@ -200,20 +222,22 @@ for g in grup_list:
     df_g = df_kelas[df_kelas['Group'] == g].copy()
     jml_rider = len(df_g)
     
-    df_g['Gate M1'] = range(1, jml_rider + 1)
-    df_g['Gate M2'] = df_g['Gate M1'].apply(lambda x: x+1 if x%2!=0 and x<jml_rider else (x-1 if x%2==0 else x))
-    df_g['Gate M1'] = df_g['Gate M1'].astype(str)
-    df_g['Gate M2'] = df_g['Gate M2'].astype(str)
+    # Isi default jika gate masih kosong
+    if (df_g['Gate M1'] == "-").all():
+        df_g['Gate M1'] = [str(i) for i in range(1, jml_rider + 1)]
+    if (df_g['Gate M2'] == "-").all():
+        df_g['Gate M2'] = df_g['Gate M1'].apply(lambda x: str(int(x)+1 if int(x)%2!=0 and int(x)<jml_rider else (int(x)-1 if int(x)%2==0 else int(x))) if str(x).isdigit() else "1")
     
     options = ["-"] + [str(i) for i in range(1, jml_rider + 1)] + ["DNS", "DNF"]
+    gate_options = [str(i) for i in range(1, jml_rider + 1)]
     
     col_cfg = {
         "NO": st.column_config.TextColumn("NO", disabled=True),
         "Number plate": st.column_config.TextColumn("No. Plate", disabled=True),
         "Name": st.column_config.TextColumn("Nama Rider", disabled=True),
         "Team": st.column_config.TextColumn("Komunitas", disabled=True),
-        "Gate M1": st.column_config.TextColumn("Gate M1", disabled=True),
-        "Gate M2": st.column_config.TextColumn("Gate M2", disabled=True),
+        "Gate M1": st.column_config.SelectboxColumn("Gate M1 (Live Draw)", options=gate_options),
+        "Gate M2": st.column_config.SelectboxColumn("Gate M2 (Live Draw)", options=gate_options),
         "M1": st.column_config.SelectboxColumn("Moto 1", options=options),
         "M2": st.column_config.SelectboxColumn("Moto 2", options=options)
     }
@@ -258,31 +282,32 @@ if moto_errors:
 
 edited_df_moto = pd.concat(edited_motos) if edited_motos else df_kelas
 klasemen = df_kelas.copy()
-klasemen.update(edited_df_moto[['M1', 'M2']])
+klasemen.update(edited_df_moto[['Gate M1', 'Gate M2', 'M1', 'M2']])
 klasemen['M1_Num'] = edited_df_moto['M1_Num']
 klasemen['M2_Num'] = edited_df_moto['M2_Num']
 klasemen['Total Point'] = edited_df_moto['Total Point']
+
+# Update DataFrame utama server
+df.update(klasemen)
+db["saved_df"] = df
 
 klasemen_aktif = klasemen[klasemen['Total Point'] > 0].copy()
 grup_valid = sorted([g for g in klasemen_aktif['Group'].unique() if str(g) not in ["", "-", "NAN"]])
 jumlah_grup_aktif = len(grup_valid)
 total_peserta_aktif = len(klasemen_aktif)
 
-# PASTIKAN KOLOM BERSIFAT STRING/OBJECT AGAR TIDAK TYPE ERROR
 klasemen_aktif['Status'] = "-"
 klasemen_aktif['Gate'] = "-"
 klasemen_aktif['Status'] = klasemen_aktif['Status'].astype(str)
 klasemen_aktif['Gate'] = klasemen_aktif['Gate'].astype(str)
 
-# DETEKSI ALUR
 use_qf = False
 if skema_alur == "Gunakan Quarter-Final (QF -> SF -> Final)":
     use_qf = True
 elif skema_alur == "Otomatis (Berdasarkan Jumlah Peserta)" and total_peserta_aktif >= 36:
     use_qf = True
 
-edited_rep, edited_qf, edited_sf, edited_final = None, None, None, None
-
+edited_rep, edited_final = None, None
 FINAL_TIERS = [f"Final {p}" for p in selected_piala] + ["Finisher"]
 
 if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)":
@@ -306,13 +331,11 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
             rem_list = g_df[g_df['Rank di Grup'] > quota].index.tolist()
             rest_riders.extend(rem_list)
             
-    # SEMUA RIDER DI LUAR KUOTA QF & REPECHAGE LANGSUNG MENJADI FINISHER
     if rest_riders:
         for idx_r in rest_riders:
             klasemen_aktif.loc[idx_r, 'Status'] = "Finisher"
             klasemen_aktif.loc[idx_r, 'Gate'] = "-"
 
-    # PEMBAGIAN QF / SF
     if use_qf:
         for i, idx_r in enumerate(pass_riders):
             qf_num = (i % 4) + 1
@@ -336,7 +359,9 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
 
     klasemen_aktif['Status_Moto'] = klasemen_aktif['Status'].astype(str)
 
+    # ==========================================
     # FASE 2: REPECHAGE
+    # ==========================================
     rep_df = klasemen_aktif[klasemen_aktif['Status'] == 'Repechage'].copy().sort_values('Gate')
     if enable_repechage and len(rep_df) > 0:
         st.header("2. 🛟 Fase 2: Repechage")
@@ -353,6 +378,7 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
         for idx in edited_rep.index:
             hr = str(edited_rep.at[idx, 'Hasil Repechage']).strip()
             klasemen_aktif.loc[idx, 'Hasil Repechage'] = hr
+            df.loc[idx, 'Hasil Repechage'] = hr
             if hr.isdigit():
                 pos = int(hr)
                 if use_qf:
@@ -364,68 +390,76 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
                     else: klasemen_aktif.loc[idx, 'Status'] = "Finisher"
         st.divider()
 
-    # FASE 3A: QUARTER-FINAL (40 BESAR)
+    # ==========================================
+    # FASE 3A: QUARTER-FINAL (TABEL PER GRUP)
+    # ==========================================
     if use_qf:
-        st.header("3. ⚡ Fase 3A: Quarter-Final (40 Besar)")
-        qf_df = klasemen_aktif[klasemen_aktif['Status'].str.startswith('Quarter-Final', na=False)].copy().sort_values(['Status', 'Gate'])
-        if len(qf_df) > 0:
-            qf_options = ["-"] + [str(i) for i in range(1, batas_gate + 1)]
-            editor_columns_qf = {
-                "Status": st.column_config.TextColumn("Grup QF", disabled=True), 
-                "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), 
-                "Name": st.column_config.TextColumn("Nama Rider", disabled=True), 
-                "Hasil QF": st.column_config.SelectboxColumn("Posisi Finish QF", options=qf_options),
-                "Gate": st.column_config.TextColumn("Gate", disabled=True)
-            }
-            edited_qf = st.data_editor(qf_df[['Status', 'Number plate', 'Name', 'Hasil QF', 'Gate']], column_config=editor_columns_qf, hide_index=True, key=f"qf_{selected_kelas}", use_container_width=True)
-            
-            four_tier_mode = all(k in selected_piala for k in ["Utama", "Novice", "Rookie", "Beginner"])
-            
-            for idx in edited_qf.index:
-                hqf = str(edited_qf.at[idx, 'Hasil QF']).strip()
-                klasemen_aktif.loc[idx, 'Hasil QF'] = hqf
-                if hqf.isdigit():
-                    pos = int(hqf)
-                    qf_group = str(edited_qf.at[idx, 'Status'])
-                    
-                    if four_tier_mode:
-                        if pos <= 5:
-                            klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1 (Utama/Novice)" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 2 (Utama/Novice)"
-                        else:
-                            klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 3 (Rookie/Beginner)" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 4 (Rookie/Beginner)"
-                    else:
-                        if pos <= 5:
-                            klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1" if ("1" in qf_group or "3" in qf_group) else "Semi-Final 2"
-                        else:
-                            klasemen_aktif.loc[idx, 'Status'] = "Finisher"
-            st.divider()
-
-    # FASE 3B: SEMI-FINAL
-    st.header("3B. ⚔️ Fase 3B: Semi-Final")
-    sf_df = klasemen_aktif[klasemen_aktif['Status'].str.startswith('Semi-Final', na=False)].copy().sort_values(['Status', 'Gate'])
-    if len(sf_df) > 0:
-        sf_options = ["-"] + [str(i) for i in range(1, batas_gate + 1)]
-        editor_columns_sf = {
-            "Status": st.column_config.TextColumn("Grup SF", disabled=True), 
-            "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), 
-            "Name": st.column_config.TextColumn("Nama Rider", disabled=True), 
-            "Hasil Semi-Final": st.column_config.SelectboxColumn("Posisi Finish SF", options=sf_options),
-            "Gate": st.column_config.TextColumn("Gate", disabled=True)
-        }
-        edited_sf = st.data_editor(sf_df[['Status', 'Number plate', 'Name', 'Hasil Semi-Final', 'Gate']], column_config=editor_columns_sf, hide_index=True, key=f"sf_{selected_kelas}", use_container_width=True)
+        st.header("3. ⚡ Fase 3A: Quarter-Final (QF 1 - 4)")
+        qf_list = [f"Quarter-Final {i}" for i in range(1, 5)]
+        four_tier_mode = all(k in selected_piala for k in ["Utama", "Novice", "Rookie", "Beginner"])
         
-        for idx in edited_sf.index:
-            hsf = str(edited_sf.at[idx, 'Hasil Semi-Final']).strip()
-            klasemen_aktif.loc[idx, 'Hasil Semi-Final'] = hsf
-            if hsf.isdigit():
-                pos = int(hsf)
-                sf_type = str(edited_sf.at[idx, 'Status'])
+        for qf_name in qf_list:
+            qf_sub = klasemen_aktif[klasemen_aktif['Status'] == qf_name].copy().sort_values('Gate')
+            if len(qf_sub) > 0:
+                st.markdown(f"**🔹 {qf_name}** ({len(qf_sub)} Rider)")
+                qf_options = ["-"] + [str(i) for i in range(1, len(qf_sub) + 1)]
+                col_cfg_qf = {
+                    "Number plate": st.column_config.TextColumn("No. Plate", disabled=True),
+                    "Name": st.column_config.TextColumn("Nama Rider", disabled=True),
+                    "Hasil QF": st.column_config.SelectboxColumn("Posisi Finish QF", options=qf_options),
+                    "Gate": st.column_config.TextColumn("Gate", disabled=True)
+                }
+                edited_qf_sub = st.data_editor(qf_sub[['Number plate', 'Name', 'Hasil QF', 'Gate']], column_config=col_cfg_qf, hide_index=True, key=f"qf_{selected_kelas}_{qf_name}", use_container_width=True)
                 
-                if "Rookie/Beginner" in sf_type:
-                    klasemen_aktif.loc[idx, 'Status'] = "Final Rookie" if pos <= 5 else ("Final Beginner" if "Beginner" in selected_piala else "Finisher")
-                else:
-                    klasemen_aktif.loc[idx, 'Status'] = "Final Utama" if pos <= 5 else ("Final Novice" if "Novice" in selected_piala else "Finisher")
+                for idx in edited_qf_sub.index:
+                    hqf = str(edited_qf_sub.at[idx, 'Hasil QF']).strip()
+                    klasemen_aktif.loc[idx, 'Hasil QF'] = hqf
+                    df.loc[idx, 'Hasil QF'] = hqf
+                    if hqf.isdigit():
+                        pos = int(hqf)
+                        if four_tier_mode:
+                            if pos <= 5:
+                                klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1 (Utama/Novice)" if ("1" in qf_name or "3" in qf_name) else "Semi-Final 2 (Utama/Novice)"
+                            else:
+                                klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 3 (Rookie/Beginner)" if ("1" in qf_name or "3" in qf_name) else "Semi-Final 4 (Rookie/Beginner)"
+                        else:
+                            if pos <= 5:
+                                klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1" if ("1" in qf_name or "3" in qf_name) else "Semi-Final 2"
+                            else:
+                                klasemen_aktif.loc[idx, 'Status'] = "Finisher"
+        st.divider()
+
+    # ==========================================
+    # FASE 3B: SEMI-FINAL (TABEL PER GRUP)
+    # ==========================================
+    st.header("3B. ⚔️ Fase 3B: Semi-Final")
+    sf_active_groups = sorted([s for s in klasemen_aktif['Status'].unique() if "Semi-Final" in str(s)])
+    
+    if sf_active_groups:
+        for sf_name in sf_active_groups:
+            sf_sub = klasemen_aktif[klasemen_aktif['Status'] == sf_name].copy().sort_values('Gate')
+            if len(sf_sub) > 0:
+                st.markdown(f"**🔹 {sf_name}** ({len(sf_sub)} Rider)")
+                sf_options = ["-"] + [str(i) for i in range(1, len(sf_sub) + 1)]
+                col_cfg_sf = {
+                    "Number plate": st.column_config.TextColumn("No. Plate", disabled=True),
+                    "Name": st.column_config.TextColumn("Nama Rider", disabled=True),
+                    "Hasil Semi-Final": st.column_config.SelectboxColumn("Posisi Finish SF", options=sf_options),
+                    "Gate": st.column_config.TextColumn("Gate", disabled=True)
+                }
+                edited_sf_sub = st.data_editor(sf_sub[['Number plate', 'Name', 'Hasil Semi-Final', 'Gate']], column_config=col_cfg_sf, hide_index=True, key=f"sf_{selected_kelas}_{sf_name}", use_container_width=True)
                 
+                for idx in edited_sf_sub.index:
+                    hsf = str(edited_sf_sub.at[idx, 'Hasil Semi-Final']).strip()
+                    klasemen_aktif.loc[idx, 'Hasil Semi-Final'] = hsf
+                    df.loc[idx, 'Hasil Semi-Final'] = hsf
+                    if hsf.isdigit():
+                        pos = int(hsf)
+                        if "Rookie/Beginner" in sf_name:
+                            klasemen_aktif.loc[idx, 'Status'] = "Final Rookie" if pos <= 5 else ("Final Beginner" if "Beginner" in selected_piala else "Finisher")
+                        else:
+                            klasemen_aktif.loc[idx, 'Status'] = "Final Utama" if pos <= 5 else ("Final Novice" if "Novice" in selected_piala else "Finisher")
+        
         for target_final in FINAL_TIERS:
             mask = klasemen_aktif['Status'] == target_final
             if mask.sum() > 0:
@@ -474,6 +508,8 @@ if len(klasemen_aktif) > 0:
         use_container_width=True
     )
     klasemen_aktif['Hasil Akhir'] = edited_final['Hasil Akhir']
+    df.update(klasemen_aktif[['Hasil Akhir']])
+    db["saved_df"] = df
 
 st.write("---")
 
@@ -501,8 +537,8 @@ def prepare_block(df_filtered, block_type="MOTO"):
         res['Gate'] = res['Gate'].astype(str)
         return res
     elif block_type == "MOTO":
-        cols_base = ['Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Status_Moto']
-        cols_rename = ['Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Remark / Status Lolos']
+        cols_base = ['Gate M1', 'Gate M2', 'Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Status_Moto']
+        cols_rename = ['Gate M1', 'Gate M2', 'Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Remark / Status Lolos']
         res = df_filtered[cols_base].copy()
         res.columns = cols_rename
         res['Total Poin'] = res['Total Poin'].astype(int).astype(str)
@@ -550,8 +586,21 @@ if not klasemen_aktif.empty:
         if not df_b_f.empty:
             tables_dict["🏆 Babak Final (Podium)"].append((final_tier.upper(), prepare_block(df_b_f, "FINAL")))
 
-# TOMBOL PUBLIKASI
-col_pub, col_dl = st.columns(2)
+# ==========================================
+# TOMBOL AKSI: SIMPAN DRAFT, PUBLIKASI, & EXCEL
+# ==========================================
+col_draft, col_pub, col_dl = st.columns(3)
+
+with col_draft:
+    if st.button("💾 SIMPAN DRAFT TURNAMEN", use_container_width=True, help="Simpan semua data ke server agar tidak hilang"):
+        draft_payload = {
+            "event_name": db["event_name"],
+            "logo_url": db["logo_url"],
+            "df_records": df.to_dict(orient="records")
+        }
+        with open("draft_turnamen.json", "w") as f:
+            json.dump(draft_payload, f)
+        st.success("✅ Draft berhasil disimpan di server!")
 
 with col_pub:
     if st.button("📢 SIMPAN & PUBLIKASI KE PENONTON", use_container_width=True):
@@ -563,9 +612,20 @@ with col_pub:
             }
         }
         db["live_payload"] = payload_data
+        
+        # Simpan live payload dan draft
         with open("live_standing.json", "w") as f:
             json.dump(payload_data, f)
-        st.success("✅ Berhasil dipublikasikan! Rider non-QF otomatis berstatus Finisher.")
+            
+        draft_payload = {
+            "event_name": db["event_name"],
+            "logo_url": db["logo_url"],
+            "df_records": df.to_dict(orient="records")
+        }
+        with open("draft_turnamen.json", "w") as f:
+            json.dump(draft_payload, f)
+            
+        st.success("✅ Berhasil dipublikasikan & draft tersimpan!")
 
 with col_dl:
     output = BytesIO()
