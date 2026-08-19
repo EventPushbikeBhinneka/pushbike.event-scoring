@@ -33,7 +33,6 @@ def get_global_database():
 
 db = get_global_database()
 
-# Load Draft otomatis jika database server baru restart
 if db["saved_df"] is None and os.path.exists("draft_turnamen.json"):
     try:
         with open("draft_turnamen.json", "r") as f:
@@ -167,7 +166,7 @@ if uploaded_file is not None:
         st.error(f"Gagal membaca file upload: {e}")
 
 if db["saved_df"] is None:
-    st.info("Silakan unggah file data peserta terlebih dahulu atau gunakan data yang tersimpan.")
+    st.info("Silakan unggah file data peserta terlebih dahulu.")
     st.stop()
 
 df = db["saved_df"].copy()
@@ -222,7 +221,6 @@ for g in grup_list:
     df_g = df_kelas[df_kelas['Group'] == g].copy()
     jml_rider = len(df_g)
     
-    # Isi default jika gate masih kosong
     if (df_g['Gate M1'] == "-").all():
         df_g['Gate M1'] = [str(i) for i in range(1, jml_rider + 1)]
     if (df_g['Gate M2'] == "-").all():
@@ -287,13 +285,11 @@ klasemen['M1_Num'] = edited_df_moto['M1_Num']
 klasemen['M2_Num'] = edited_df_moto['M2_Num']
 klasemen['Total Point'] = edited_df_moto['Total Point']
 
-# Update DataFrame utama server
 df.update(klasemen)
 db["saved_df"] = df
 
 klasemen_aktif = klasemen[klasemen['Total Point'] > 0].copy()
 grup_valid = sorted([g for g in klasemen_aktif['Group'].unique() if str(g) not in ["", "-", "NAN"]])
-jumlah_grup_aktif = len(grup_valid)
 total_peserta_aktif = len(klasemen_aktif)
 
 klasemen_aktif['Status'] = "-"
@@ -307,7 +303,6 @@ if skema_alur == "Gunakan Quarter-Final (QF -> SF -> Final)":
 elif skema_alur == "Otomatis (Berdasarkan Jumlah Peserta)" and total_peserta_aktif >= 36:
     use_qf = True
 
-edited_rep, edited_final = None, None
 FINAL_TIERS = [f"Final {p}" for p in selected_piala] + ["Finisher"]
 
 if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)":
@@ -362,7 +357,10 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
     # ==========================================
     # FASE 2: REPECHAGE
     # ==========================================
-    rep_df = klasemen_aktif[klasemen_aktif['Status'] == 'Repechage'].copy().sort_values('Gate')
+    rep_df = klasemen_aktif[klasemen_aktif['Status'] == 'Repechage'].copy()
+    rep_df['Gate_Sort'] = pd.to_numeric(rep_df['Gate'], errors='coerce').fillna(99)
+    rep_df = rep_df.sort_values('Gate_Sort')
+    
     if enable_repechage and len(rep_df) > 0:
         st.header("2. 🛟 Fase 2: Repechage")
         rep_options = ["-"] + [str(i) for i in range(1, len(rep_df) + 1)]
@@ -375,6 +373,7 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
         }
         edited_rep = st.data_editor(rep_df[['Number plate', 'Name', 'Hasil Repechage', 'Gate']], column_config=editor_columns_rep, hide_index=True, key=f"rep_{selected_kelas}", use_container_width=True)
         
+        # LOGIKA PENEMPATAN REPECHAGE KE QUARTER-FINAL GATE 10 (PERSIS SESUAI INSTRUKSI)
         for idx in edited_rep.index:
             hr = str(edited_rep.at[idx, 'Hasil Repechage']).strip()
             klasemen_aktif.loc[idx, 'Hasil Repechage'] = hr
@@ -382,12 +381,31 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
             if hr.isdigit():
                 pos = int(hr)
                 if use_qf:
-                    if pos <= 4: klasemen_aktif.loc[idx, 'Status'] = f"Quarter-Final {pos}"
-                    else: klasemen_aktif.loc[idx, 'Status'] = "Finisher"
+                    if pos == 4:
+                        klasemen_aktif.loc[idx, 'Status'] = "Quarter-Final 1"
+                        klasemen_aktif.loc[idx, 'Gate'] = str(batas_gate)
+                    elif pos == 3:
+                        klasemen_aktif.loc[idx, 'Status'] = "Quarter-Final 2"
+                        klasemen_aktif.loc[idx, 'Gate'] = str(batas_gate)
+                    elif pos == 2:
+                        klasemen_aktif.loc[idx, 'Status'] = "Quarter-Final 3"
+                        klasemen_aktif.loc[idx, 'Gate'] = str(batas_gate)
+                    elif pos == 1:
+                        klasemen_aktif.loc[idx, 'Status'] = "Quarter-Final 4"
+                        klasemen_aktif.loc[idx, 'Gate'] = str(batas_gate)
+                    else:
+                        klasemen_aktif.loc[idx, 'Status'] = "Finisher"
+                        klasemen_aktif.loc[idx, 'Gate'] = "-"
                 else:
-                    if pos == 1: klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1"
-                    elif pos == 2: klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 2"
-                    else: klasemen_aktif.loc[idx, 'Status'] = "Finisher"
+                    if pos == 1:
+                        klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1"
+                        klasemen_aktif.loc[idx, 'Gate'] = str(batas_gate)
+                    elif pos == 2:
+                        klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 2"
+                        klasemen_aktif.loc[idx, 'Gate'] = str(batas_gate)
+                    else:
+                        klasemen_aktif.loc[idx, 'Status'] = "Finisher"
+                        klasemen_aktif.loc[idx, 'Gate'] = "-"
         st.divider()
 
     # ==========================================
@@ -399,7 +417,10 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
         four_tier_mode = all(k in selected_piala for k in ["Utama", "Novice", "Rookie", "Beginner"])
         
         for qf_name in qf_list:
-            qf_sub = klasemen_aktif[klasemen_aktif['Status'] == qf_name].copy().sort_values('Gate')
+            qf_sub = klasemen_aktif[klasemen_aktif['Status'] == qf_name].copy()
+            qf_sub['Gate_Sort'] = pd.to_numeric(qf_sub['Gate'], errors='coerce').fillna(99)
+            qf_sub = qf_sub.sort_values('Gate_Sort')
+            
             if len(qf_sub) > 0:
                 st.markdown(f"**🔹 {qf_name}** ({len(qf_sub)} Rider)")
                 qf_options = ["-"] + [str(i) for i in range(1, len(qf_sub) + 1)]
@@ -437,7 +458,10 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
     
     if sf_active_groups:
         for sf_name in sf_active_groups:
-            sf_sub = klasemen_aktif[klasemen_aktif['Status'] == sf_name].copy().sort_values('Gate')
+            sf_sub = klasemen_aktif[klasemen_aktif['Status'] == sf_name].copy()
+            sf_sub['Gate_Sort'] = pd.to_numeric(sf_sub['Gate'], errors='coerce').fillna(99)
+            sf_sub = sf_sub.sort_values('Gate_Sort')
+            
             if len(sf_sub) > 0:
                 st.markdown(f"**🔹 {sf_name}** ({len(sf_sub)} Rider)")
                 sf_options = ["-"] + [str(i) for i in range(1, len(sf_sub) + 1)]
@@ -482,7 +506,8 @@ st.header("4. 🏆 Fase 4: Hasil Final & Input Podium")
 status_map = {t: i for i, t in enumerate(FINAL_TIERS)}
 if 'Status' in klasemen_aktif.columns:
     klasemen_aktif['Status_Order'] = klasemen_aktif['Status'].map(status_map).fillna(99)
-    klasemen_aktif = klasemen_aktif.sort_values(by=['Status_Order', 'Gate'])
+    klasemen_aktif['Gate_Sort'] = pd.to_numeric(klasemen_aktif['Gate'], errors='coerce').fillna(99)
+    klasemen_aktif = klasemen_aktif.sort_values(by=['Status_Order', 'Gate_Sort'])
 
 pilihan_hasil = ["-", "Gugur/DNF"]
 for kat in selected_piala:
@@ -491,7 +516,7 @@ for kat in selected_piala:
 pilihan_hasil.append("Finisher")
 
 editor_columns_final = {
-    "Status_Order": None, "Hasil QF": None, "Hasil Repechage": None, "Hasil Semi-Final": None, "NO": None,
+    "Status_Order": None, "Gate_Sort": None, "Hasil QF": None, "Hasil Repechage": None, "Hasil Semi-Final": None, "NO": None,
     "Number plate": st.column_config.TextColumn("No. Plate", disabled=True), 
     "Name": st.column_config.TextColumn("Nama Rider", disabled=True),
     "Status": st.column_config.TextColumn("Bracket Final", disabled=True),
@@ -528,10 +553,13 @@ def extract_rank(hasil):
     return base + int(num) if num else 997
 
 def prepare_block(df_filtered, block_type="MOTO"):
+    df_filtered = df_filtered.copy()
+    df_filtered['Gate_Sort'] = pd.to_numeric(df_filtered['Gate'], errors='coerce').fillna(99)
+    
     if block_type == "FINAL":
         df_filtered['RankSort'] = df_filtered['Hasil Akhir'].apply(extract_rank)
         has_podium = (df_filtered['Hasil Akhir'] != "-").any()
-        res = df_filtered.sort_values('RankSort').copy() if has_podium else df_filtered.sort_values('Gate').copy()
+        res = df_filtered.sort_values('RankSort').copy() if has_podium else df_filtered.sort_values('Gate_Sort').copy()
         res = res[['Name', 'Number plate', 'Team', 'Hasil Akhir', 'Gate']]
         res.columns = ['Nama Rider', 'No. Plate', 'Komunitas', 'Hasil Podium', 'Gate']
         res['Gate'] = res['Gate'].astype(str)
@@ -544,9 +572,10 @@ def prepare_block(df_filtered, block_type="MOTO"):
         res['Total Poin'] = res['Total Poin'].astype(int).astype(str)
         return res
     else:
+        res = df_filtered.sort_values('Gate_Sort').copy()
         cols_base = ['Name', 'Number plate', 'Team', 'M1', 'M2', 'Total Point', 'Gate']
         cols_rename = ['Nama Rider', 'No. Plate', 'Komunitas', 'M1', 'M2', 'Total Poin', 'Gate']
-        res = df_filtered[cols_base].copy()
+        res = res[cols_base].copy()
         res.columns = cols_rename
         res['Total Poin'] = res['Total Poin'].astype(int).astype(str)
         res['Gate'] = res['Gate'].astype(str)
@@ -566,18 +595,18 @@ if not klasemen_aktif.empty:
         df_g = klasemen_aktif[klasemen_aktif['Group'] == g].sort_values(by=['Total Point', 'M2_Num', 'M1_Num'])
         tables_dict["🏁 Kualifikasi Moto"].append((f"MOTO - GRUP {g}", prepare_block(df_g, "MOTO")))
         
-    df_b_rep = klasemen_aktif[klasemen_aktif.get('Status_Moto', '') == "Repechage"].sort_values('Gate')
+    df_b_rep = klasemen_aktif[klasemen_aktif.get('Status_Moto', '') == "Repechage"]
     if not df_b_rep.empty:
         tables_dict["🛟 Repechage"].append(("REPECHAGE", prepare_block(df_b_rep, "REPECHAGE")))
         
     for qf_name in [f"Quarter-Final {i}" for i in range(1, 5)]:
-        df_b_qf = klasemen_aktif[klasemen_aktif['Status'].str.startswith(qf_name, na=False)].sort_values('Gate')
+        df_b_qf = klasemen_aktif[klasemen_aktif['Status'] == qf_name]
         if not df_b_qf.empty:
             tables_dict["⚡ Quarter-Final"].append((qf_name.upper(), prepare_block(df_b_qf, "QF")))
             
     sf_list = [s for s in klasemen_aktif['Status'].unique() if "Semi-Final" in str(s)]
     for sf_name in sorted(sf_list):
-        df_b_sf = klasemen_aktif[klasemen_aktif['Status'] == sf_name].sort_values('Gate')
+        df_b_sf = klasemen_aktif[klasemen_aktif['Status'] == sf_name]
         if not df_b_sf.empty:
             tables_dict["⚔️ Semi-Final"].append((sf_name.upper(), prepare_block(df_b_sf, "SF")))
             
@@ -592,7 +621,7 @@ if not klasemen_aktif.empty:
 col_draft, col_pub, col_dl = st.columns(3)
 
 with col_draft:
-    if st.button("💾 SIMPAN DRAFT TURNAMEN", use_container_width=True, help="Simpan semua data ke server agar tidak hilang"):
+    if st.button("💾 SIMPAN DRAFT TURNAMEN", use_container_width=True):
         draft_payload = {
             "event_name": db["event_name"],
             "logo_url": db["logo_url"],
@@ -613,7 +642,6 @@ with col_pub:
         }
         db["live_payload"] = payload_data
         
-        # Simpan live payload dan draft
         with open("live_standing.json", "w") as f:
             json.dump(payload_data, f)
             
@@ -625,7 +653,7 @@ with col_pub:
         with open("draft_turnamen.json", "w") as f:
             json.dump(draft_payload, f)
             
-        st.success("✅ Berhasil dipublikasikan & draft tersimpan!")
+        st.success("✅ Berhasil dipublikasikan & peserta Repechage masuk ke Gate 10 Quarter-Final!")
 
 with col_dl:
     output = BytesIO()
