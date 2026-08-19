@@ -87,7 +87,7 @@ if role == "👥 Penonton (Live Score)":
         st.markdown(f"""
         <div class="metric-card">
             <h4 style="margin:0; color:#1e3c72;">🏁 KELAS: {live_data.get('kelas', '-')}</h4>
-            <span style="font-size:0.85rem; color:#666;">Status: Hasil Resmi Terverifikasi Juri</span>
+            <span style="font-size:0.85rem; color:#666;">Status: Hasil Resmi Terverifikasi Juri (Seeding Silang)</span>
         </div>
         """, unsafe_allow_html=True)
         
@@ -305,52 +305,68 @@ elif skema_alur == "Otomatis (Berdasarkan Jumlah Peserta)" and total_peserta_akt
 
 FINAL_TIERS = [f"Final {p}" for p in selected_piala] + ["Finisher"]
 
+# =========================================================================
+# LOGIKA SEEDING BERDASARKAN RANK DI GRUP (BMX OFFICIAL SERPENTINE SEEDING)
+# =========================================================================
 if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)":
+    # 1. Tentukan Rank 1, 2, 3, 4, 5 di masing-masing grup moto
     klasemen_aktif = klasemen_aktif.sort_values(by=['Group', 'Total Point', 'M2_Num', 'M1_Num'])
     klasemen_aktif['Rank di Grup'] = klasemen_aktif.groupby('Group').cumcount() + 1
     
-    pass_riders, rep_riders, rest_riders = [], [], []
     quota = custom_qf_quota
+    num_heat = 4 if use_qf else 2  # 4 Heat untuk QF, 2 Heat untuk SF
+    heat_prefix = "Quarter-Final" if use_qf else "Semi-Final"
+    
+    # Kumpulkan rider per tier peringkat (Rank 1 semua grup, Rank 2 semua grup, dst)
+    rank_tiers = {r: [] for r in range(1, quota + 1)}
+    rep_riders = []
+    rest_riders = []
     
     for g_name in grup_valid:
         g_df = klasemen_aktif[klasemen_aktif['Group'] == g_name]
-        p_list = g_df[g_df['Rank di Grup'] <= quota].index.tolist()
-        pass_riders.extend(p_list)
+        for r in range(1, quota + 1):
+            r_idx = g_df[g_df['Rank di Grup'] == r].index.tolist()
+            if r_idx: rank_tiers[r].extend(r_idx)
         
         if enable_repechage:
-            r_list = g_df[g_df['Rank di Grup'] == quota + 1].index.tolist()
-            rep_riders.extend(r_list)
-            rem_list = g_df[g_df['Rank di Grup'] > quota + 1].index.tolist()
-            rest_riders.extend(rem_list)
+            rep_idx = g_df[g_df['Rank di Grup'] == quota + 1].index.tolist()
+            if rep_idx: rep_riders.extend(rep_idx)
+            rem_idx = g_df[g_df['Rank di Grup'] > quota + 1].index.tolist()
+            if rem_idx: rest_riders.extend(rem_idx)
         else:
-            rem_list = g_df[g_df['Rank di Grup'] > quota].index.tolist()
-            rest_riders.extend(rem_list)
-            
+            rem_idx = g_df[g_df['Rank di Grup'] > quota].index.tolist()
+            if rem_idx: rest_riders.extend(rem_idx)
+
+    # 2. Siswa non-QF / Repechage langsung berstatus Finisher
     if rest_riders:
         for idx_r in rest_riders:
             klasemen_aktif.loc[idx_r, 'Status'] = "Finisher"
             klasemen_aktif.loc[idx_r, 'Gate'] = "-"
 
-    if use_qf:
-        for i, idx_r in enumerate(pass_riders):
-            qf_num = (i % 4) + 1
-            klasemen_aktif.loc[idx_r, 'Status'] = f"Quarter-Final {qf_num}"
-            klasemen_aktif.loc[idx_r, 'Gate'] = str((i // 4) + 1)
+    # 3. Lakukan Distribusi Silang (Serpentine Cross-Seeding)
+    # Track nomor gate terisi untuk setiap heat/grup
+    heat_gate_counter = {h: 1 for h in range(1, num_heat + 1)}
+    
+    for r in range(1, quota + 1):
+        riders_in_this_rank = rank_tiers[r]
+        # Jika rank genap, balikkan urutan pembagian (serpentine) agar tidak saling bertemu terus
+        heat_order = list(range(1, num_heat + 1)) if r % 2 != 0 else list(range(num_heat, 0, -1))
+        
+        for idx_r in riders_in_this_rank:
+            # Cari heat yang gate-nya paling sedikit terisi di tier rank ini
+            target_heat = min(heat_order, key=lambda h: heat_gate_counter[h])
+            assigned_gate = heat_gate_counter[target_heat]
             
-        if rep_riders:
-            for i, idx_r in enumerate(rep_riders):
-                klasemen_aktif.loc[idx_r, 'Status'] = "Repechage"
-                klasemen_aktif.loc[idx_r, 'Gate'] = str(i + 1)
-    else:
-        for i, idx_r in enumerate(pass_riders):
-            sf_num = (i % 2) + 1
-            klasemen_aktif.loc[idx_r, 'Status'] = f"Semi-Final {sf_num}"
-            klasemen_aktif.loc[idx_r, 'Gate'] = str((i // 2) + 1)
+            klasemen_aktif.loc[idx_r, 'Status'] = f"{heat_prefix} {target_heat}"
+            klasemen_aktif.loc[idx_r, 'Gate'] = str(assigned_gate)
             
-        if rep_riders:
-            for i, idx_r in enumerate(rep_riders):
-                klasemen_aktif.loc[idx_r, 'Status'] = "Repechage"
-                klasemen_aktif.loc[idx_r, 'Gate'] = str(i + 1)
+            heat_gate_counter[target_heat] += 1
+
+    # 4. Alokasi Peserta Repechage (Gate diurutkan)
+    if rep_riders:
+        for i, idx_r in enumerate(rep_riders):
+            klasemen_aktif.loc[idx_r, 'Status'] = "Repechage"
+            klasemen_aktif.loc[idx_r, 'Gate'] = str(i + 1)
 
     klasemen_aktif['Status_Moto'] = klasemen_aktif['Status'].astype(str)
 
@@ -373,7 +389,7 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
         }
         edited_rep = st.data_editor(rep_df[['Number plate', 'Name', 'Hasil Repechage', 'Gate']], column_config=editor_columns_rep, hide_index=True, key=f"rep_{selected_kelas}", use_container_width=True)
         
-        # LOGIKA PENEMPATAN REPECHAGE KE QUARTER-FINAL GATE 10 (PERSIS SESUAI INSTRUKSI)
+        # Penempatan Lolos Repechage ke Gate Terluar / Gate 10
         for idx in edited_rep.index:
             hr = str(edited_rep.at[idx, 'Hasil Repechage']).strip()
             klasemen_aktif.loc[idx, 'Hasil Repechage'] = hr
@@ -440,14 +456,17 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
                         pos = int(hqf)
                         if four_tier_mode:
                             if pos <= 5:
-                                klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1 (Utama/Novice)" if ("1" in qf_name or "3" in qf_name) else "Semi-Final 2 (Utama/Novice)"
+                                target_sf = "Semi-Final 1 (Utama/Novice)" if ("1" in qf_name or "3" in qf_name) else "Semi-Final 2 (Utama/Novice)"
                             else:
-                                klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 3 (Rookie/Beginner)" if ("1" in qf_name or "3" in qf_name) else "Semi-Final 4 (Rookie/Beginner)"
+                                target_sf = "Semi-Final 3 (Rookie/Beginner)" if ("1" in qf_name or "3" in qf_name) else "Semi-Final 4 (Rookie/Beginner)"
+                            klasemen_aktif.loc[idx, 'Status'] = target_sf
                         else:
                             if pos <= 5:
-                                klasemen_aktif.loc[idx, 'Status'] = "Semi-Final 1" if ("1" in qf_name or "3" in qf_name) else "Semi-Final 2"
+                                target_sf = "Semi-Final 1" if ("1" in qf_name or "3" in qf_name) else "Semi-Final 2"
+                                klasemen_aktif.loc[idx, 'Status'] = target_sf
                             else:
                                 klasemen_aktif.loc[idx, 'Status'] = "Finisher"
+                                klasemen_aktif.loc[idx, 'Gate'] = "-"
         st.divider()
 
     # ==========================================
@@ -484,6 +503,7 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
                         else:
                             klasemen_aktif.loc[idx, 'Status'] = "Final Utama" if pos <= 5 else ("Final Novice" if "Novice" in selected_piala else "Finisher")
         
+        # Penentuan Gate di Babak Final Berdasarkan Finish SF
         for target_final in FINAL_TIERS:
             mask = klasemen_aktif['Status'] == target_final
             if mask.sum() > 0:
@@ -492,6 +512,7 @@ if total_peserta_aktif > 0 and skema_alur != "Langsung Multi-Final (Tanpa QF/SF)
         st.divider()
 
 else:
+    # FORMAT LANGSUNG MULTI-FINAL (SEEDED DARI RANK MOTO)
     if len(klasemen_aktif) > 0:
         klasemen_aktif = klasemen_aktif.sort_values(by=['Total Point', 'M2_Num', 'M1_Num', 'Group'])
         for i, idx_r in enumerate(klasemen_aktif.index):
@@ -653,7 +674,7 @@ with col_pub:
         with open("draft_turnamen.json", "w") as f:
             json.dump(draft_payload, f)
             
-        st.success("✅ Berhasil dipublikasikan & peserta Repechage masuk ke Gate 10 Quarter-Final!")
+        st.success("✅ Berhasil dipublikasikan dengan sistem Seeding Silang (Cross-Group)!")
 
 with col_dl:
     output = BytesIO()
